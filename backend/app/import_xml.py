@@ -1,60 +1,37 @@
 # backend/app/import_xml.py
-
 from pathlib import Path
-import sys
 import xml.etree.ElementTree as ET
 from datetime import date, time as time_cls
-
 from sqlmodel import Session, select
-
 from .database import engine
-from .models import Adresse, Livraison, Programme
+from .models import Adresse, Livraison, Programme, Troncon
 
+# Chemin vers le dossier data
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
-
-def get_or_create_adresse(session: Session, code: str) -> Adresse:
-    """
-    On utilise le champ Adresse.adresse pour stocker le code venant du XML
-    (ex: "25610888"). On met des valeurs par défaut pour cp/coord_x/coord_y.
-    """
-    adresse = session.exec(
-        select(Adresse).where(Adresse.adresse == code)
-    ).first()
-    if adresse:
-        return adresse
-
-    adresse = Adresse(
-        adresse=code,
-        cp="00000",      # valeur par défaut
-        coord_x=0.0,     # à adapter plus tard si tu as de vraies coords
-        coord_y=0.0,
-    )
-    session.add(adresse)
-    session.commit()
-    session.refresh(adresse)
-    return adresse
-
-def import_plan_xml(filename: str) -> None:
+def import_plan_xml(filename: str) -> int:
     xml_path = DATA_DIR / filename
     if not xml_path.exists():
         raise FileNotFoundError(f"Fichier XML introuvable : {xml_path}")
-    print(f"Import du fichier {xml_path}")
-
+    
+    print(f"Import du plan : {xml_path}")
     tree = ET.parse(xml_path)
     root = tree.getroot()
+    
+    count = 0
     with Session(engine) as session:
-        nb_adresses = 0
+        # On peut vider la table Adresse si nécessaire, ou juste ajouter
+        # Pour l'instant on ajoute seulement ceux qui n'existent pas
+        
         for addr_el in root.findall("noeud"):
             adress_id = addr_el.attrib["id"]
             coord_x = float(addr_el.attrib["longitude"])
             coord_y = float(addr_el.attrib["latitude"])
 
-            adresse = session.exec(
-                select(Adresse).where(Adresse.adresse == adress_id)
-            ).first()
-            if adresse:
-                continue  # déjà existante
+            # Vérif existence (optionnel si on veut écraser)
+            existing = session.get(Adresse, adress_id)
+            if existing:
+                continue
 
             adresse = Adresse(
                 id=adress_id,
@@ -62,23 +39,26 @@ def import_plan_xml(filename: str) -> None:
                 latitude=coord_y,
             )
             session.add(adresse)
-            nb_adresses += 1
-
+            count += 1
+        
         session.commit()
+        for trancon_el in root.findall("troncon"):
+            trancon = Troncon(
+                destination_id = trancon_el.attrib["destination"],
+                longueur = float(trancon_el.attrib["longueur"]),
+                nomRue = trancon_el.attrib["nomRue"],
+                origine_id = trancon_el.attrib["origine"],
+            )
+            session.add(trancon)
+        session.commit()
+    return count
 
-def import_demande_xml(filename: str) -> None:
-    """
-    Importe un fichier demandeXXX.xml :
-    - crée l'entrepôt comme Adresse
-    - crée un Programme avec heure de départ
-    - crée toutes les Livraisons liées à ce Programme
-    """
+def import_demande_xml(filename: str) -> int:
     xml_path = DATA_DIR / filename
     if not xml_path.exists():
         raise FileNotFoundError(f"Fichier XML introuvable : {xml_path}")
 
-    print(f"Import du fichier {xml_path}")
-
+    print(f"Import de la demande : {xml_path}")
     tree = ET.parse(xml_path)
     root = tree.getroot()
 
@@ -87,17 +67,18 @@ def import_demande_xml(filename: str) -> None:
         raise ValueError("Pas de balise <entrepot> dans le XML")
 
     adresse_entrepot_code = entrepot_el.attrib["adresse"]
-    heure_depart_str = entrepot_el.attrib["heureDepart"]  # ex: "8:0:0"
-
-    # On convertit "8:0:0" -> time(8, 0, 0)
+    heure_depart_str = entrepot_el.attrib["heureDepart"]
+    
     h, m, s = map(int, heure_depart_str.split(":"))
     heure_depart = time_cls(h, m, s)
 
+    nb_livraisons = 0
     with Session(engine) as session:
-        # Entrepôt
-        entrepot_adresse = session.exec(select(Adresse).where(Adresse.id==adresse_entrepot_code)).first()
+        # Vérification que l'entrepôt existe dans le PLAN
+        entrepot_adresse = session.get(Adresse, adresse_entrepot_code)
+        if not entrepot_adresse:
+            raise ValueError(f"L'adresse de l'entrepôt {adresse_entrepot_code} n'existe pas. Avez-vous importé le plan ?")
 
-        # Programme associé à ce fichier
         programme = Programme(
             date_depart=heure_depart,
             adresse_depart_id=entrepot_adresse.id,
@@ -106,18 +87,20 @@ def import_demande_xml(filename: str) -> None:
         session.commit()
         session.refresh(programme)
 
-        # Date des livraisons : pour l'instant, on met la date du jour
         date_livraison = date.today()
 
-        nb_livraisons = 0
         for liv_el in root.findall("livraison"):
             code_pickup = liv_el.attrib["adresseEnlevement"]
             code_delivery = liv_el.attrib["adresseLivraison"]
             duree_pickup = int(liv_el.attrib["dureeEnlevement"])
             duree_delivery = int(liv_el.attrib["dureeLivraison"])
 
-            addr_pickup = session.exec(select(Adresse).where(Adresse.id==code_pickup)).first()
-            addr_delivery = session.exec(select(Adresse).where(Adresse.id==code_delivery)).first()
+            addr_pickup = session.get(Adresse, code_pickup)
+            addr_delivery = session.get(Adresse, code_delivery)
+
+            if not addr_pickup or not addr_delivery:
+                print(f"Erreur: Adresse manquante (Pickup: {code_pickup}, Delivery: {code_delivery}). Livraison ignorée.")
+                continue
 
             livraison = Livraison(
                 adresse_pickup_id=addr_pickup.id,
@@ -131,21 +114,5 @@ def import_demande_xml(filename: str) -> None:
             nb_livraisons += 1
 
         session.commit()
-
-    print(f"Import terminé pour {filename} : {nb_livraisons} livraisons créées.")
-
-
-def main():
-    if len(sys.argv) < 2:
-        print("Utilisation : python -m app.import_xml <fichier1.xml> [fichier2.xml ...]")
-        sys.exit(1)
-
-    for arg in sys.argv[1:]:
-        # on accepte "demandeGrand7" ou "demandeGrand7.xml"
-        if not arg.endswith(".xml"):
-            arg = arg + ".xml"
-        import_demande_xml(arg)
-
-
-if __name__ == "__main__":
-    main()
+    
+    return nb_livraisons
