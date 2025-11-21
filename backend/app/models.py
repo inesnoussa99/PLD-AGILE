@@ -5,11 +5,9 @@ from sqlmodel import SQLModel, Field, Relationship
 
 
 class Adresse(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    adresse: str
-    cp: str
-    coord_x: float
-    coord_y: float
+    id: str = Field(default=None, primary_key=True)
+    longitude: float
+    latitude: float
 
     # Relations inverses
     livraisons_pickup: List["Livraison"] = Relationship(
@@ -93,7 +91,7 @@ class Itineraire(SQLModel, table=True):
 class Etape(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
 
-    type: str   # 'P' ou 'D' ou 'R'
+    type: str   # 'P' ou 'D' ou 'N'
 
     itineraire_id: int = Field(foreign_key="itineraire.id")
     adresse_id: int = Field(foreign_key="adresse.id")

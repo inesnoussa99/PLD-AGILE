@@ -35,6 +35,36 @@ def get_or_create_adresse(session: Session, code: str) -> Adresse:
     session.refresh(adresse)
     return adresse
 
+def import_plan_xml(filename: str) -> None:
+    xml_path = DATA_DIR / filename
+    if not xml_path.exists():
+        raise FileNotFoundError(f"Fichier XML introuvable : {xml_path}")
+    print(f"Import du fichier {xml_path}")
+
+    tree = ET.parse(xml_path)
+    root = tree.getroot()
+    with Session(engine) as session:
+        nb_adresses = 0
+        for addr_el in root.findall("noeud"):
+            adress_id = addr_el.attrib["id"]
+            coord_x = float(addr_el.attrib["longitude"])
+            coord_y = float(addr_el.attrib["latitude"])
+
+            adresse = session.exec(
+                select(Adresse).where(Adresse.adresse == adress_id)
+            ).first()
+            if adresse:
+                continue  # déjà existante
+
+            adresse = Adresse(
+                id=adress_id,
+                longitude=coord_x,
+                latitude=coord_y,
+            )
+            session.add(adresse)
+            nb_adresses += 1
+
+        session.commit()
 
 def import_demande_xml(filename: str) -> None:
     """
@@ -47,7 +77,7 @@ def import_demande_xml(filename: str) -> None:
     if not xml_path.exists():
         raise FileNotFoundError(f"Fichier XML introuvable : {xml_path}")
 
-    print(f"📂 Import du fichier {xml_path}")
+    print(f"Import du fichier {xml_path}")
 
     tree = ET.parse(xml_path)
     root = tree.getroot()
@@ -65,7 +95,7 @@ def import_demande_xml(filename: str) -> None:
 
     with Session(engine) as session:
         # Entrepôt
-        entrepot_adresse = get_or_create_adresse(session, adresse_entrepot_code)
+        entrepot_adresse = session.exec(select(Adresse).where(Adresse.id==adresse_entrepot_code)).first()
 
         # Programme associé à ce fichier
         programme = Programme(
@@ -86,8 +116,8 @@ def import_demande_xml(filename: str) -> None:
             duree_pickup = int(liv_el.attrib["dureeEnlevement"])
             duree_delivery = int(liv_el.attrib["dureeLivraison"])
 
-            addr_pickup = get_or_create_adresse(session, code_pickup)
-            addr_delivery = get_or_create_adresse(session, code_delivery)
+            addr_pickup = session.exec(select(Adresse).where(Adresse.id==code_pickup)).first()
+            addr_delivery = session.exec(select(Adresse).where(Adresse.id==code_delivery)).first()
 
             livraison = Livraison(
                 adresse_pickup_id=addr_pickup.id,
@@ -102,7 +132,7 @@ def import_demande_xml(filename: str) -> None:
 
         session.commit()
 
-    print(f"✅ Import terminé pour {filename} : {nb_livraisons} livraisons créées.")
+    print(f"Import terminé pour {filename} : {nb_livraisons} livraisons créées.")
 
 
 def main():
