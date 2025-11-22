@@ -4,6 +4,8 @@ from sqlmodel import Session, select
 from .database import init_db, engine
 from .models import Livraison, Adresse
 from .import_xml import import_plan_xml, import_demande_xml
+from .routing import compute_shortest_path 
+
 
 app = FastAPI()
 
@@ -50,3 +52,24 @@ def import_demande(filename: str):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/plus_court_chemin")
+def plus_court_chemin(origine_id: str, destination_id: str):
+    """
+    Calcule le plus court chemin entre deux noeuds (ids d'Adresse) avec Dijkstra.
+    """
+    with Session(engine) as session:
+        path, distance = compute_shortest_path(session, origine_id, destination_id)
+
+        if path is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Aucun chemin trouvé entre {origine_id} et {destination_id}",
+            )
+
+        return {
+            "origine": origine_id,
+            "destination": destination_id,
+            "distance": distance,
+            "path": path,
+        }
