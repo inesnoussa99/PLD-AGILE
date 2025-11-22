@@ -6,7 +6,6 @@ from .models import Livraison, Adresse
 from .import_xml import import_plan_xml, import_demande_xml
 from .routing import compute_shortest_path 
 
-
 app = FastAPI()
 
 @app.on_event("startup")
@@ -55,18 +54,13 @@ def import_demande(filename: str):
     
 @app.get("/plus_court_chemin")
 def plus_court_chemin(origine_id: str, destination_id: str):
-    """
-    Calcule le plus court chemin entre deux noeuds (ids d'Adresse) avec Dijkstra.
-    """
     with Session(engine) as session:
         path, distance = compute_shortest_path(session, origine_id, destination_id)
-
         if path is None:
             raise HTTPException(
                 status_code=404,
                 detail=f"Aucun chemin trouvé entre {origine_id} et {destination_id}",
             )
-
         return {
             "origine": origine_id,
             "destination": destination_id,
