@@ -2,7 +2,7 @@
 from typing import Dict, List, Tuple, Optional
 import heapq
 from sqlmodel import Session, select
-from .models import Troncon
+from .models import Troncon,Livraison
 
 Graph = Dict[str, List[Tuple[str, float]]]
 
@@ -63,8 +63,24 @@ def dijkstra(graph: Graph, start: str, goal: str) -> Tuple[Optional[List[str]], 
     path.reverse()
     return path, dist[goal]
 
+def add_livraison(session: Session, adresse_pickup_id: str, adresse_delivery_id: str, duree_pickup: int, duree_delivery: int, date,id_programme:int ) -> int:
+    #Fonction utilitaire pour ajouter une livraison à la base de données.
+    livraison = Livraison(
+        adresse_pickup_id=adresse_pickup_id,
+        adresse_delivery_id=adresse_delivery_id,
+        duree_pickup=duree_pickup,
+        duree_delivery=duree_delivery,
+        date=date,
+        programme_id=id_programme
+    )
+    session.add(livraison)
+    session.commit()
+    session.refresh(livraison)
+    return livraison.id
+
 
 def compute_shortest_path(session: Session, origine_id: str, destination_id: str) -> Tuple[Optional[List[str]], float]:
     #Fonction utilitaire appelée par l'API : construit le graphe puis lance Dijkstra.
     graph = build_graph(session)
     return dijkstra(graph, origine_id, destination_id)
+

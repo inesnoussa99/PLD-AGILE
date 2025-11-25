@@ -67,3 +67,10 @@ def plus_court_chemin(origine_id: str, destination_id: str):
             "distance": distance,
             "path": path,
         }
+
+@app.get("/add_livraison")
+def add_livraison_api(adresse_pickup_id: str, adresse_delivery_id: str, duree_pickup: int, duree_delivery: int):
+    from .routing import add_livraison
+    from datetime import date
+    add_livraison(Session(engine), adresse_pickup_id, adresse_delivery_id, duree_pickup, duree_delivery, date.today())
+    return {"status": "success", "message": "Livraison ajoutée"}
