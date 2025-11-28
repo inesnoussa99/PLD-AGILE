@@ -133,6 +133,12 @@ button:focus-visible {
   }
 }
 
+.custom-circle-marker {
+  background-color:#4e7392; 
+  border-radius: 50%; 
+  border: 2px solid #FFF; 
+  box-shadow: 0 1px 3px rgba(0,0,0,0.5); 
+}
 
 
 @layer base {

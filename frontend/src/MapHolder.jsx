@@ -2,12 +2,24 @@ import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
-// Correction icône par défaut Leaflet (sinon markers n'apparaissent pas)
+
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
   iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
   shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+});
+
+
+const circleIcon = new L.divIcon({
+  className: "custom-circle-marker", 
+  
+  html: "", 
+  
+  iconSize: [14, 14],
+  
+  
+  iconAnchor: [7, 7], 
 });
 
 export default function MapHolder({ mapData }) {
@@ -37,10 +49,11 @@ export default function MapHolder({ mapData }) {
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
       {mapData.map(node => (
-        <Marker
-          key={node.id}
-          position={[node.latitude, node.longitude]}
-        >
+        <Marker 
+        key={node.id} 
+        position={[node.latitude, node.longitude]} 
+        icon={circleIcon} 
+      >
           <Popup>
             ID: {node.id} <br />
             lat: {node.latitude}, lng: {node.longitude}
