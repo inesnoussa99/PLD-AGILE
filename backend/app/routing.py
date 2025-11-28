@@ -1,102 +1,125 @@
-# backend/app/routing.py
-from typing import Dict, List, Tuple, Optional
-import heapq
+import networkx as nx
 from sqlmodel import Session, select
-from .models import Troncon, Livraison, Adresse
+from .models import Troncon, Livraison, Programme
 
-Graph = Dict[str, List[Tuple[str, float]]]
-
-def build_graph(session: Session) -> Graph:
-    #Construit le graphe en mémoire à partir de la table Troncon.
-    #Chaque sommet est une adresse (id de noeud), et chaque arête un tronçon orienté.
-    graph: Graph = {}
+def build_graph(session: Session) -> nx.DiGraph:
+    """
+    Construit un graphe orienté NetworkX à partir des tronçons en base de données.
+    """
     troncons = session.exec(select(Troncon)).all()
+    G = nx.DiGraph()
+    
+    # On ajoute les arêtes avec l'attribut 'weight' pour la longueur
     for t in troncons:
-        origine = t.origine_id
-        dest = t.destination_id
-        longueur = float(t.longueur)
-        if origine not in graph:
-            graph[origine] = []
-        graph[origine].append((dest, longueur))
-        # Si le graphe est NON orienté, on peut décommenter ça : (idk)
-        # if dest not in graph:
-        #     graph[dest] = []
-        # graph[dest].append((origine, longueur))
-    return graph
+        G.add_edge(t.origine_id, t.destination_id, weight=t.longueur)
+    
+    return G
 
+def calculate_tour(session: Session):
+    """
+    Calcule une tournée heuristique (Nearest Neighbor) en utilisant NetworkX.
+    """
+    # 1. Préparation des données
+    G = build_graph(session)
+    livraisons = session.exec(select(Livraison)).all()
+    programme = session.exec(select(Programme)).first()
 
-def dijkstra(graph: Graph, start: str, goal: str) -> Tuple[Optional[List[str]], float]:
-    #Algorithme de Dijkstra pour trouver le plus court chemin entre start et goal.
-    #Retourne (chemin, distance_totale). Si pas de chemin -> (None, inf).
-    if start not in graph and start != goal:
-        return None, float("inf")
-    # Distance minimale connue jusqu'à chaque noeud
-    dist = {start: 0.0}
-    # Pour reconstruire le chemin
-    prev: Dict[str, str] = {}
-    # File de priorité (distance, noeud)
-    heap: List[Tuple[float, str]] = [(0.0, start)]
-    while heap:
-        d_current, node = heapq.heappop(heap)
-        # Si on a déjà un meilleur chemin, on saute
-        if d_current > dist.get(node, float("inf")):
-            continue
-        # Si on est arrivé à la destination
-        if node == goal:
-            break
-        # Parcourir les voisins
-        for neighbor, weight in graph.get(node, []):
-            new_dist = d_current + weight
-            if new_dist < dist.get(neighbor, float("inf")):
-                dist[neighbor] = new_dist
-                prev[neighbor] = node
-                heapq.heappush(heap, (new_dist, neighbor))
-    if goal not in dist:
-        return None, float("inf")
-    # Reconstruire le chemin en remontant depuis goal
-    path: List[str] = []
-    current = goal
-    while current != start:
-        path.append(current)
-        current = prev[current]
-    path.append(start)
-    path.reverse()
-    return path, dist[goal]
+    if not programme:
+        return None
 
-def add_livraison(session: Session, adresse_pickup_id: str, adresse_delivery_id: str, duree_pickup: int, duree_delivery: int, date,id_programme:int ) -> int:
-    #Fonction utilitaire pour ajouter une livraison à la base de données.
-    livraison = Livraison(
-        adresse_pickup_id=adresse_pickup_id,
-        adresse_delivery_id=adresse_delivery_id,
-        duree_pickup=duree_pickup,
-        duree_delivery=duree_delivery,
-        date=date,
-        programme_id=id_programme
-    )
-    session.add(livraison)
-    session.commit()
-    session.refresh(livraison)
-    return livraison.id
+    warehouse = programme.adresse_depart_id
+    
+    # Dictionnaires pour accès rapide
+    pickups = {l.adresse_pickup_id: l for l in livraisons}
+    deliveries = {l.adresse_delivery_id: l for l in livraisons}
+    
+    # Au départ, seuls les points de Pickup sont des candidats
+    candidates = set(pickups.keys())
+    
+    current_node = warehouse
+    total_distance = 0
+    full_path_ids = [] # Liste séquentielle des IDs de noeuds visités
+    steps = [] # Liste structurée des étapes (Pickup, Delivery, etc.)
 
+    # Ajout de l'étape de départ
+    steps.append({"type": "ENTREPOT", "id": warehouse})
 
-def compute_shortest_path(session: Session, origine_id: str, destination_id: str) -> Tuple[Optional[List[str]], float]:
-    #Fonction utilitaire appelée par l'API : construit le graphe puis lance Dijkstra.
-    graph = build_graph(session)
-    return dijkstra(graph, origine_id, destination_id)
+    # 2. Boucle principale (Tant qu'il y a des points à visiter)
+    while candidates:
+        try:
+            # Calcul des distances vers TOUS les autres noeuds depuis la position actuelle
+            # NetworkX le fait très efficacement avec Dijkstra "Single Source"
+            lengths, paths = nx.single_source_dijkstra(G, current_node, weight='weight')
+        except nx.NetworkXNoPath:
+            print(f"Erreur: Impossible de trouver un chemin depuis {current_node}")
+            return None
 
+        # On cherche le candidat le plus proche parmi ceux accessibles
+        # On filtre 'lengths' pour ne garder que les noeuds qui sont dans 'candidates'
+        available_candidates = {node: dist for node, dist in lengths.items() if node in candidates}
+
+        if not available_candidates:
+            print("Erreur: Aucun candidat accessible (Graphe déconnecté ?)")
+            return None
+
+        # Sélection du plus proche (min sur la distance)
+        nearest_node = min(available_candidates, key=available_candidates.get)
+        distance_to_travel = available_candidates[nearest_node]
+        path_to_travel = paths[nearest_node]
+
+        # Mise à jour des totaux
+        total_distance += distance_to_travel
+        
+        # On ajoute le chemin (sauf le premier point pour éviter les doublons A->B, B->C)
+        if full_path_ids:
+            full_path_ids.extend(path_to_travel[1:])
+        else:
+            full_path_ids.extend(path_to_travel)
+
+        # Mise à jour de la position et des candidats
+        current_node = nearest_node
+        candidates.remove(current_node)
+
+        # Logique métier : Pickup -> Delivery devient disponible
+        if current_node in pickups:
+            livraison = pickups[current_node]
+            candidates.add(livraison.adresse_delivery_id)
+            steps.append({"type": "PICKUP", "id": current_node, "livraison_id": livraison.id})
+        elif current_node in deliveries:
+            livraison = deliveries[current_node]
+            steps.append({"type": "DELIVERY", "id": current_node, "livraison_id": livraison.id})
+
+    # 3. Retour à l'entrepôt
+    try:
+        return_length = nx.shortest_path_length(G, current_node, warehouse, weight='weight')
+        return_path = nx.shortest_path(G, current_node, warehouse, weight='weight')
+        
+        total_distance += return_length
+        full_path_ids.extend(return_path[1:])
+        steps.append({"type": "ENTREPOT_FIN", "id": warehouse})
+        
+    except nx.NetworkXNoPath:
+        print("Erreur: Impossible de retourner à l'entrepôt.")
+        return None
+
+    return {
+        "total_distance": total_distance,
+        "full_path_ids": full_path_ids,
+        "steps": steps
+    }
+""" 
 def compute_path_for_animation(
     session: Session,
     origine_id: str,
     destination_id: str,
     vitesse_kmh: float = 15.0,
 ) -> Optional[Dict]:
-    """
-    Calcule le plus court chemin entre deux adresses et retourne
-    une liste d'étapes numérotées avec coordonnées, distance cumulée
-    et temps cumulé (pour animer le livreur côté front).
+    #Calcule le plus court chemin entre deux adresses et retourne
+    #une liste d'étapes numérotées avec coordonnées, distance cumulée
+    #et temps cumulé (pour animer le livreur côté front).
 
-    - vitesse_kmh : vitesse moyenne du livreur (ex : 15 km/h à vélo)
-    """
+    #- vitesse_kmh : vitesse moyenne du livreur (ex : 15 km/h à vélo)
+    
     # On construit le graphe et on utilise le Dijkstra existant
     graph = build_graph(session)
     path, distance_totale = dijkstra(graph, origine_id, destination_id)
@@ -156,4 +179,4 @@ def compute_path_for_animation(
         "vitesse_kmh": vitesse_kmh,
         "steps": steps,
     }
-
+"""

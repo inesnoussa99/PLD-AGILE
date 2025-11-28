@@ -2,7 +2,7 @@
 from pathlib import Path
 import xml.etree.ElementTree as ET
 from datetime import date, time as time_cls
-from sqlmodel import Session, select
+from sqlmodel import Session, select,delete
 from .database import engine
 from .models import Adresse, Livraison, Programme, Troncon
 
@@ -74,6 +74,11 @@ def import_demande_xml(filename: str) -> int:
 
     nb_livraisons = 0
     with Session(engine) as session:
+        # on vide les livraisons et programmes existants
+        session.exec(delete(Livraison))
+        session.exec(delete(Programme))
+        session.commit()
+
         # Vérification que l'entrepôt existe dans le PLAN
         entrepot_adresse = session.get(Adresse, adresse_entrepot_code)
         if not entrepot_adresse:

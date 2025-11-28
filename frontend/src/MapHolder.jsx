@@ -1,6 +1,10 @@
-import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
+import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+import 'leaflet-arrowheads'; 
+import { useMemo, useRef, useEffect } from 'react';
+
+
 
 
 delete L.Icon.Default.prototype._getIconUrl;
@@ -22,44 +26,116 @@ const circleIcon = new L.divIcon({
   iconAnchor: [7, 7], 
 });
 
-export default function MapHolder({ mapData }) {
-  if (mapData.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center w-full h-full rounded-xl bg-gray-100 border border-gray-300 p-6">
-        <p className="text-gray-400 text-lg">Carte de la ville</p>
-        <p className="text-gray-400 text-sm">
-          Aucune carte chargée. Utilisez « Charger une carte (XML) » dans le panneau de gauche.
-        </p>
-      </div>
-    );
-  }
+const createColoredIcon = (color) => {
+  return new L.Icon({
+    iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-${color}.png`,
+    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+    iconSize: [25, 41],
+    iconAnchor: [12, 41],
+    popupAnchor: [1, -34],
+    shadowSize: [41, 41]
+  });
+};
+const warehouseIcon = createColoredIcon('black');
+const pickupIcon = createColoredIcon('green');
+const deliveryIcon = createColoredIcon('red');
+const defaultIcon = new L.Icon.Default();
 
-  // Calculer le centre de la carte
-  const latitudes = mapData.map(n => n.latitude);
-  const longitudes = mapData.map(n => n.longitude);
-  const center = [
-    latitudes.reduce((a,b) => a+b,0)/latitudes.length,
-    longitudes.reduce((a,b) => a+b,0)/longitudes.length
-  ];
+export default function MapHolder({ mapData, tour }) {
+  const defaultCenter = mapData.length > 0 
+    ? [mapData[0].latitude, mapData[0].longitude] 
+    : [45.75, 4.85];
+
+  // 👇 3. Création de la référence pour la Polyline
+  const polylineRef = useRef(null);
+
+  const { nodesMap, nodeRoles } = useMemo(() => {
+    const nMap = new Map(mapData.map(node => [node.id, node]));
+    const nRoles = new Map();
+    if (tour && tour.steps) {
+      tour.steps.forEach(step => {
+        const type = step.type.includes('ENTREPOT') ? 'ENTREPOT' : step.type;
+        nRoles.set(step.id, type);
+      });
+    }
+    return { nodesMap: nMap, nodeRoles: nRoles };
+  }, [mapData, tour]);
+
+  const routeCoordinates = useMemo(() => {
+    if (!tour || !tour.full_path_ids) return [];
+    return tour.full_path_ids
+      .map(id => {
+        const node = nodesMap.get(id);
+        return node ? [node.latitude, node.longitude] : null;
+      })
+      .filter(c => c !== null);
+  }, [tour, nodesMap]);
+
+  // 👇 4. UseEffect pour ajouter les flèches quand l'itinéraire change
+  useEffect(() => {
+    if (polylineRef.current) {
+        // On applique les flèches sur l'instance Leaflet
+        // .arrowheads() est ajouté par l'import 'leaflet-arrowheads'
+        polylineRef.current.arrowheads({
+            size: '15px',     // Taille de la flèche
+            frequency: '80px', // Une flèche tous les 80 pixels
+            fill: true,       // Flèche pleine
+            color: '#2563eb', // Même couleur que la ligne (blue-600)
+            yawn: 60          // Angle d'ouverture de la flèche
+        });
+        
+        // Force la mise à jour visuelle (parfois nécessaire)
+        polylineRef.current.redraw();
+    }
+  }, [routeCoordinates]); // Se relance si les coordonnées changent
 
   return (
-    <MapContainer center={center} zoom={14} scrollWheelZoom={true} className="w-full h-full rounded-xl">
+    <MapContainer center={defaultCenter} zoom={13} style={{ height: '100%', width: '100%' }}>
       <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a>'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        attribution='&copy; OpenStreetMap contributors'
       />
-      {mapData.map(node => (
-        <Marker 
-        key={node.id} 
-        position={[node.latitude, node.longitude]} 
-        icon={circleIcon} 
-      >
-          <Popup>
-            ID: {node.id} <br />
-            lat: {node.latitude}, lng: {node.longitude}
-          </Popup>
-        </Marker>
-      ))}
+
+      {routeCoordinates.length > 0 && (
+        <Polyline 
+          ref={polylineRef} // 👇 5. On attache la référence ici
+          positions={routeCoordinates} 
+          color="#2563eb" 
+          weight={4} 
+          opacity={0.7} 
+        />
+      )}
+
+      {mapData.map((node) => {
+        const role = nodeRoles.get(node.id);
+        let iconToUse = defaultIcon;
+        let label = `Noeud ${node.id}`;
+
+        if (tour) {
+            if (role === 'ENTREPOT') {
+                iconToUse = warehouseIcon;
+                label = `🏢 Entrepôt (${node.id})`;
+            } else if (role === 'PICKUP') {
+                iconToUse = pickupIcon;
+                label = `📦 Enlèvement (${node.id})`;
+            } else if (role === 'DELIVERY') {
+                iconToUse = deliveryIcon;
+                label = `📍 Livraison (${node.id})`;
+            } else {
+                return null; 
+            }
+        }
+        
+        return (
+          <Marker 
+            key={node.id} 
+            position={[node.latitude, node.longitude]}
+            icon={iconToUse}
+          >
+            <Popup className="font-semibold">{label}</Popup>
+          </Marker>
+        );
+      })}
     </MapContainer>
   );
 }
