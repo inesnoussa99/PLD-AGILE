@@ -1,5 +1,7 @@
 # backend/app/main.py
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
+import shutil
+import os
 from sqlmodel import Session, select
 from .database import init_db, engine
 from .models import Livraison, Adresse
@@ -74,3 +76,23 @@ def add_livraison_api(adresse_pickup_id: str, adresse_delivery_id: str, duree_pi
     from datetime import date
     add_livraison(Session(engine), adresse_pickup_id, adresse_delivery_id, duree_pickup, duree_delivery, date.today())
     return {"status": "success", "message": "Livraison ajoutée"}
+
+@app.post("/upload_plan")
+async def upload_plan(file: UploadFile = File(...)):
+    try:
+        
+        file_location = f"data/{file.filename}"
+        
+        
+        os.makedirs("data", exist_ok=True)
+        
+        with open(file_location, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            
+        count = import_plan_xml(file_location) 
+        
+        # Pour l'instant, on retourne juste le succès
+        return {"status": "success", "message": f"Fichier {file.filename} reçu et sauvegardé."}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
