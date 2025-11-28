@@ -2,7 +2,7 @@
 from typing import Dict, List, Tuple, Optional
 import heapq
 from sqlmodel import Session, select
-from .models import Troncon,Livraison
+from .models import Troncon, Livraison, Adresse
 
 Graph = Dict[str, List[Tuple[str, float]]]
 
@@ -83,4 +83,77 @@ def compute_shortest_path(session: Session, origine_id: str, destination_id: str
     #Fonction utilitaire appelée par l'API : construit le graphe puis lance Dijkstra.
     graph = build_graph(session)
     return dijkstra(graph, origine_id, destination_id)
+
+def compute_path_for_animation(
+    session: Session,
+    origine_id: str,
+    destination_id: str,
+    vitesse_kmh: float = 15.0,
+) -> Optional[Dict]:
+    """
+    Calcule le plus court chemin entre deux adresses et retourne
+    une liste d'étapes numérotées avec coordonnées, distance cumulée
+    et temps cumulé (pour animer le livreur côté front).
+
+    - vitesse_kmh : vitesse moyenne du livreur (ex : 15 km/h à vélo)
+    """
+    # On construit le graphe et on utilise le Dijkstra existant
+    graph = build_graph(session)
+    path, distance_totale = dijkstra(graph, origine_id, destination_id)
+
+    if path is None:
+        return None
+
+    # Récupérer les coordonnées des adresses utilisées dans le chemin
+    adresses = session.exec(
+        select(Adresse).where(Adresse.id.in_(path))
+    ).all()
+    adresse_map = {a.id: a for a in adresses}
+
+    # Conversion vitesse km/h -> m/s (si 'longueur' est en mètres)
+    vitesse_ms = vitesse_kmh / 3.6 if vitesse_kmh > 0 else 0.0
+
+    steps = []
+    distance_cumulee = 0.0
+
+    for idx, node_id in enumerate(path):
+        adresse = adresse_map.get(node_id)
+
+        # On ajoute l'étape courante avec la distance cumulée actuelle
+        step = {
+            "step_index": idx,
+            "adresse_id": node_id,
+            "longitude": adresse.longitude if adresse else None,
+            "latitude": adresse.latitude if adresse else None,
+            "distance_cumulee": distance_cumulee,
+        }
+
+        if vitesse_ms > 0:
+            step["temps_cumule"] = distance_cumulee / vitesse_ms
+        else:
+            step["temps_cumule"] = None
+
+        steps.append(step)
+
+        # Met à jour la distance pour la prochaine étape
+        if idx < len(path) - 1:
+            u = node_id
+            v = path[idx + 1]
+
+            longueur_arc = None
+            for voisin, w in graph.get(u, []):
+                if voisin == v:
+                    longueur_arc = w
+                    break
+
+            if longueur_arc is not None:
+                distance_cumulee += float(longueur_arc)
+
+    return {
+        "origine_id": origine_id,
+        "destination_id": destination_id,
+        "distance_totale": distance_totale,
+        "vitesse_kmh": vitesse_kmh,
+        "steps": steps,
+    }
 
