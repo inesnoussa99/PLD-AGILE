@@ -11,30 +11,55 @@ export default function Sidebar({ setMapData, setOpenedMap }) {
     setFile(e.target.files[0]);
   };
 
-  const handleLoadMap = () => {
-    if (!file) return;
+ const handleLoadMap = () => {
+  if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const xmlString = event.target.result;
+  const reader = new FileReader();
 
-      const parser = new DOMParser();
-      const xmlDoc = parser.parseFromString(xmlString, "text/xml");
+  reader.onload = async (event) => {
+    const xmlString = event.target.result;
 
-      // Récupère tous les noeuds
-      const nodes = Array.from(xmlDoc.getElementsByTagName("noeud")).map(n => ({
-        id: n.getAttribute("id"),
-        latitude: parseFloat(n.getAttribute("latitude")),
-        longitude: parseFloat(n.getAttribute("longitude")),
-      }));
+    // --- Analyse du XML côté front ---
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(xmlString, "text/xml");
 
-      setMapData(nodes);
-      setOpenedMap(true);
-      setStatus(`Carte chargée : ${file.name}`);
-    };
+    const nodes = Array.from(xmlDoc.getElementsByTagName("noeud")).map(n => ({
+      id: n.getAttribute("id"),
+      latitude: parseFloat(n.getAttribute("latitude")),
+      longitude: parseFloat(n.getAttribute("longitude")),
+    }));
 
-    reader.readAsText(file);
+    // Mise à jour front
+    setMapData(nodes);
+    setOpenedMap(true);
+    setStatus(`Carte chargée : ${file.name}`);
+
+    // --- Envoi du XML au backend ---
+    try {
+      const formData = new FormData();
+      formData.append("file", file); // On envoie directement le fichier XML
+
+      const response = await fetch("http://localhost:8000/upload_plan", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error("Erreur lors de l'envoi au backend");
+      }
+
+      const result = await response.json();
+      console.log("Réponse backend :", result);
+
+      setStatus(`Carte ${file.name} chargée et envoyée ✔`);
+    } catch (error) {
+      console.error(error);
+      setStatus("Erreur : impossible d'envoyer la carte au backend ");
+    }
   };
+
+  reader.readAsText(file);
+};
 
   return (
     <div className="w-72 p-4 space-y-4 bg-white border-r h-full overflow-y-auto">
