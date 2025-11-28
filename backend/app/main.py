@@ -6,7 +6,8 @@ from sqlmodel import Session, select
 from .database import init_db, engine
 from .models import Livraison, Adresse
 from .import_xml import import_plan_xml, import_demande_xml
-from .routing import compute_shortest_path 
+from .routing import compute_shortest_path, compute_path_for_animation
+
 
 app = FastAPI()
 
@@ -94,5 +95,41 @@ async def upload_plan(file: UploadFile = File(...)):
         # Pour l'instant, on retourne juste le succès
         return {"status": "success", "message": f"Fichier {file.filename} reçu et sauvegardé."}
 
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/plus_court_chemin_detaille")
+def plus_court_chemin_detaille(
+    origine_id: str,
+    destination_id: str,
+    vitesse_kmh: float = 15.0,
+):
+    """
+    Retourne le plus court chemin entre deux adresses, sous forme d'étapes
+    numérotées avec coordonnées, distance cumulée et temps cumulé.
+
+    Utilisable côté front pour :
+    - afficher le sens de la tournée (1, 2, 3, ...)
+    - animer le déplacement du livreur le long du trajet.
+    """
+    try:
+        with Session(engine) as session:
+            details = compute_path_for_animation(
+                session=session,
+                origine_id=origine_id,
+                destination_id=destination_id,
+                vitesse_kmh=vitesse_kmh,
+            )
+
+        if details is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Aucun chemin trouvé entre ces deux adresses.",
+            )
+
+        return details
+
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
