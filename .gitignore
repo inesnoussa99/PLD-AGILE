@@ -24,3 +24,6 @@ hs_err_pid*
 replay_pid*
 
 .DS_Store
+
+backend/app/__pycache__
+backend/app/__pycache__/*
