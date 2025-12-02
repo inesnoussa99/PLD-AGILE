@@ -1,31 +1,21 @@
 import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
 import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
-import 'leaflet-arrowheads'; 
+import 'leaflet-arrowheads';
 import { useMemo, useRef, useEffect } from 'react';
 
-
-
+import iconRetinaUrl from 'leaflet/dist/images/marker-icon-2x.png';
+import iconUrl from 'leaflet/dist/images/marker-icon.png';
+import shadowUrl from 'leaflet/dist/images/marker-shadow.png';
 
 delete L.Icon.Default.prototype._getIconUrl;
+
 L.Icon.Default.mergeOptions({
-  iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-  iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-  shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+  iconRetinaUrl,
+  iconUrl,
+  shadowUrl,
 });
 
-
-const circleIcon = new L.divIcon({
-  className: "custom-circle-marker", 
-  
-  html: "", 
-  
-  iconSize: [14, 14],
-  
-  
-  iconAnchor: [7, 7], 
-});
-
+// --- Définition des Icônes ---
 const createColoredIcon = (color) => {
   return new L.Icon({
     iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-${color}.png`,
@@ -41,77 +31,108 @@ const pickupIcon = createColoredIcon('green');
 const deliveryIcon = createColoredIcon('red');
 const defaultIcon = new L.Icon.Default();
 
-export default function MapHolder({ mapData, tour }) {
+// --- SOUS-COMPOSANT POUR UNE LIGNE (Pour gérer les flèches individuellement) ---
+const RoutePolyline = ({ positions, color }) => {
+  const polyRef = useRef(null);
+
+  useEffect(() => {
+    if (polyRef.current) {
+      polyRef.current.arrowheads({
+        size: '15px',
+        frequency: '80px',
+        fill: true,
+        color: color,
+        yawn: 60
+      });
+      polyRef.current.redraw();
+    }
+  }, [positions, color]);
+
+  return <Polyline ref={polyRef} positions={positions} color={color} weight={4} opacity={0.8} />;
+};
+
+// --- COMPOSANT PRINCIPAL ---
+export default function MapHolder({ mapData, tour, onMarkerClick, selectionMode }) {
+  
   const defaultCenter = mapData.length > 0 
     ? [mapData[0].latitude, mapData[0].longitude] 
     : [45.75, 4.85];
 
-  // 👇 3. Création de la référence pour la Polyline
-  const polylineRef = useRef(null);
+  const mapStyle = { height: '100%', width: '100%', cursor: selectionMode ? 'crosshair' : 'grab' };
 
+  // 1. Préparation des données (Nodes & Roles)
   const { nodesMap, nodeRoles } = useMemo(() => {
     const nMap = new Map(mapData.map(node => [node.id, node]));
     const nRoles = new Map();
-    if (tour && tour.steps) {
-      tour.steps.forEach(step => {
-        const type = step.type.includes('ENTREPOT') ? 'ENTREPOT' : step.type;
-        nRoles.set(step.id, type);
-      });
+
+    // Fonction utilitaire pour traiter une tournée
+    const processTourObj = (t) => {
+      if (t.steps) {
+        t.steps.forEach(step => {
+          const type = step.type.includes('ENTREPOT') ? 'ENTREPOT' : step.type;
+          nRoles.set(step.id, type);
+        });
+      }
+    };
+
+    // Gestion : tour peut être null, un objet unique (vieux format) ou un tableau (nouveau format)
+    if (Array.isArray(tour)) {
+      tour.forEach(t => processTourObj(t));
+    } else if (tour) {
+      processTourObj(tour);
     }
+
     return { nodesMap: nMap, nodeRoles: nRoles };
   }, [mapData, tour]);
 
-  const routeCoordinates = useMemo(() => {
-    if (!tour || !tour.full_path_ids) return [];
-    return tour.full_path_ids
-      .map(id => {
-        const node = nodesMap.get(id);
-        return node ? [node.latitude, node.longitude] : null;
-      })
-      .filter(c => c !== null);
+  // 2. Préparation des lignes à tracer
+  const routesToDisplay = useMemo(() => {
+    if (!tour) return [];
+    
+    // On normalise en tableau
+    const tourList = Array.isArray(tour) ? tour : [tour];
+
+    return tourList.map((t, index) => {
+      // Conversion des IDs en coords
+      const coords = t.full_path_ids
+        .map(id => {
+          const node = nodesMap.get(id);
+          return node ? [node.latitude, node.longitude] : null;
+        })
+        .filter(c => c !== null);
+
+      return {
+        key: index,
+        coords: coords,
+        color: t.color || "#2563eb" // Couleur fournie par le back, ou bleu par défaut
+      };
+    });
   }, [tour, nodesMap]);
 
-  // 👇 4. UseEffect pour ajouter les flèches quand l'itinéraire change
-  useEffect(() => {
-    if (polylineRef.current) {
-        // On applique les flèches sur l'instance Leaflet
-        // .arrowheads() est ajouté par l'import 'leaflet-arrowheads'
-        polylineRef.current.arrowheads({
-            size: '15px',     // Taille de la flèche
-            frequency: '80px', // Une flèche tous les 80 pixels
-            fill: true,       // Flèche pleine
-            color: '#2563eb', // Même couleur que la ligne (blue-600)
-            yawn: 60          // Angle d'ouverture de la flèche
-        });
-        
-        // Force la mise à jour visuelle (parfois nécessaire)
-        polylineRef.current.redraw();
-    }
-  }, [routeCoordinates]); // Se relance si les coordonnées changent
 
   return (
-    <MapContainer center={defaultCenter} zoom={13} style={{ height: '100%', width: '100%' }}>
+    <MapContainer center={defaultCenter} zoom={13} style={mapStyle}>
       <TileLayer
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         attribution='&copy; OpenStreetMap contributors'
       />
 
-      {routeCoordinates.length > 0 && (
-        <Polyline 
-          ref={polylineRef} // 👇 5. On attache la référence ici
-          positions={routeCoordinates} 
-          color="#2563eb" 
-          weight={4} 
-          opacity={0.7} 
+      {/* Affichage des itinéraires */}
+      {routesToDisplay.map(route => (
+        <RoutePolyline 
+          key={route.key} 
+          positions={route.coords} 
+          color={route.color} 
         />
-      )}
+      ))}
 
+      {/* Affichage des marqueurs */}
       {mapData.map((node) => {
         const role = nodeRoles.get(node.id);
         let iconToUse = defaultIcon;
         let label = `Noeud ${node.id}`;
 
-        if (tour) {
+        if (tour) { // Si un calcul est fait, on filtre et colore
             if (role === 'ENTREPOT') {
                 iconToUse = warehouseIcon;
                 label = `🏢 Entrepôt (${node.id})`;
@@ -122,7 +143,7 @@ export default function MapHolder({ mapData, tour }) {
                 iconToUse = deliveryIcon;
                 label = `📍 Livraison (${node.id})`;
             } else {
-                return null; 
+                return null; // On masque les points inutiles
             }
         }
         
@@ -131,6 +152,9 @@ export default function MapHolder({ mapData, tour }) {
             key={node.id} 
             position={[node.latitude, node.longitude]}
             icon={iconToUse}
+            eventHandlers={{
+              click: () => { if (onMarkerClick) onMarkerClick(node.id); }
+            }}
           >
             <Popup className="font-semibold">{label}</Popup>
           </Marker>

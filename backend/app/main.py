@@ -7,7 +7,7 @@ from sqlmodel import Session, select
 from .database import init_db, engine
 from .models import Livraison, Adresse
 from .import_xml import import_plan_xml, import_demande_xml
-from .routing import calculate_tour
+from .routing import calculate_multiple_tours, add_livraison
 
 app = FastAPI()
 
@@ -72,22 +72,25 @@ def import_demande(filename: str):
         raise HTTPException(status_code=500, detail=str(e))
     
 @app.get("/calculer_tournee")
-def calculer_tournee():
+def calculer_tournee(nb_livreurs: int = 1): 
     with Session(engine) as session:
         try:
-            # Appel à la fonction NetworkX de routing.py
-            result = calculate_tour(session)
             
-            if not result:
-                raise HTTPException(
+            results = calculate_multiple_tours(session, nb_livreurs)
+            
+            if not results:
+                 raise HTTPException(
                     status_code=404, 
-                    detail="Impossible de calculer la tournée. Vérifiez qu'un plan et une demande sont chargés."
+                    detail="Impossible de calculer. Vérifiez qu'un plan et une demande sont chargés."
                 )
             
-            return result
+            
+            return results
             
         except Exception as e:
             print(f"Erreur lors du calcul de tournée: {e}")
+            import traceback
+            traceback.print_exc()
             raise HTTPException(status_code=500, detail=str(e))
         
 @app.get("/add_livraison")
