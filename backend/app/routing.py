@@ -107,6 +107,23 @@ def calculate_tour(session: Session):
         "full_path_ids": full_path_ids,
         "steps": steps
     }
+
+def add_livraison(session: Session, adresse_pickup_id: str, adresse_delivery_id: str, duree_pickup: int, duree_delivery: int) -> Livraison:
+    """
+    Ajoute une nouvelle livraison à la base de données.
+    """
+    nouvelle_livraison = Livraison(
+        adresse_pickup_id=adresse_pickup_id,
+        adresse_delivery_id=adresse_delivery_id,
+        duree_pickup=duree_pickup,
+        duree_delivery=duree_delivery
+    )
+    session.add(nouvelle_livraison)
+    session.commit()
+    session.refresh(nouvelle_livraison)
+    return nouvelle_livraison
+
+
 """ 
 def compute_path_for_animation(
     session: Session,
