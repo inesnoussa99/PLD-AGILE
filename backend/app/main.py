@@ -100,6 +100,17 @@ def add_livraison_api(adresse_pickup_id: str, adresse_delivery_id: str, duree_pi
     add_livraison(Session(engine), adresse_pickup_id, adresse_delivery_id, duree_pickup, duree_delivery, date.today())
     return {"status": "success", "message": "Livraison ajoutée"}
 
+@app.delete("/livraisons/{livraison_id}")
+def delete_livraison(livraison_id: int):
+    with Session(engine) as session:
+        livraison = session.get(Livraison, livraison_id)
+        if not livraison:
+            raise HTTPException(status_code=404, detail="Livraison introuvable")
+        
+        session.delete(livraison)
+        session.commit()
+        return {"status": "success", "message": f"Livraison {livraison_id} supprimée"}
+        
 @app.post("/upload_plan")
 async def upload_plan(file: UploadFile = File(...)):
     try:

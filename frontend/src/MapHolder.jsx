@@ -1,165 +1,165 @@
-import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
+import { useMemo, useRef, useEffect } from 'react';
+import { MapContainer, TileLayer, CircleMarker, Popup, useMap, Polyline, Marker } from "react-leaflet";
 import L from 'leaflet';
 import 'leaflet-arrowheads';
-import { useMemo, useRef, useEffect } from 'react';
+import "leaflet/dist/leaflet.css";
 
-import iconRetinaUrl from 'leaflet/dist/images/marker-icon-2x.png';
-import iconUrl from 'leaflet/dist/images/marker-icon.png';
-import shadowUrl from 'leaflet/dist/images/marker-shadow.png';
+const createNumberedIcon = (number, type) => {
+  let bgClass = "";
+  if (type === "pickup") bgClass = "bg-blue-600";
+  else if (type === "delivery") bgClass = "bg-red-600";
+  else if (type === "warehouse") bgClass = "bg-yellow-400 text-slate-900"; 
+  else if (type === "temp-pickup") bgClass = "bg-blue-400 opacity-90 border-dashed border-2"; 
+  else if (type === "temp-delivery") bgClass = "bg-red-400 opacity-90 border-dashed border-2";
 
-delete L.Icon.Default.prototype._getIconUrl;
-
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl,
-  iconUrl,
-  shadowUrl,
-});
-
-// --- Définition des Icônes ---
-const createColoredIcon = (color) => {
-  return new L.Icon({
-    iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-${color}.png`,
-    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
-    iconSize: [25, 41],
-    iconAnchor: [12, 41],
-    popupAnchor: [1, -34],
-    shadowSize: [41, 41]
-  });
+  const html = `
+    <div class="${bgClass} w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold border-2 border-white shadow-md transform hover:scale-110 transition-transform">
+      ${number}
+    </div>
+  `;
+  return L.divIcon({ className: "bg-transparent", html, iconSize: [24, 24], iconAnchor: [12, 12], popupAnchor: [0, -12] });
 };
-const warehouseIcon = createColoredIcon('black');
-const pickupIcon = createColoredIcon('green');
-const deliveryIcon = createColoredIcon('red');
-const defaultIcon = new L.Icon.Default();
 
-// --- SOUS-COMPOSANT POUR UNE LIGNE (Pour gérer les flèches individuellement) ---
-const RoutePolyline = ({ positions, color }) => {
-  const polyRef = useRef(null);
+function MapRecenter({ mapData }) {
+  const map = useMap();
+  useEffect(() => {
+    if (mapData && mapData.length > 0) {
+      const lats = mapData.map(n => n.latitude);
+      const lngs = mapData.map(n => n.longitude);
+      map.fitBounds([[Math.min(...lats), Math.min(...lngs)], [Math.max(...lats), Math.max(...lngs)]], { padding: [50, 50] });
+    }
+  }, [mapData, map]);
+  return null;
+}
+
+function RouteWithArrows({ positions, color }) {
+  const polylineRef = useRef(null);
 
   useEffect(() => {
-    if (polyRef.current) {
-      polyRef.current.arrowheads({
-        size: '15px',
-        frequency: '80px',
-        fill: true,
-        color: color,
-        yawn: 60
-      });
-      polyRef.current.redraw();
-    }
-  }, [positions, color]);
-
-  return <Polyline ref={polyRef} positions={positions} color={color} weight={4} opacity={0.8} />;
-};
-
-// --- COMPOSANT PRINCIPAL ---
-export default function MapHolder({ mapData, tour, onMarkerClick, selectionMode }) {
-  
-  const defaultCenter = mapData.length > 0 
-    ? [mapData[0].latitude, mapData[0].longitude] 
-    : [45.75, 4.85];
-
-  const mapStyle = { height: '100%', width: '100%', cursor: selectionMode ? 'crosshair' : 'grab' };
-
-  // 1. Préparation des données (Nodes & Roles)
-  const { nodesMap, nodeRoles } = useMemo(() => {
-    const nMap = new Map(mapData.map(node => [node.id, node]));
-    const nRoles = new Map();
-
-    // Fonction utilitaire pour traiter une tournée
-    const processTourObj = (t) => {
-      if (t.steps) {
-        t.steps.forEach(step => {
-          const type = step.type.includes('ENTREPOT') ? 'ENTREPOT' : step.type;
-          nRoles.set(step.id, type);
+    const polyline = polylineRef.current;
+    if (polyline) {
+      // leaflet-arrowheads ajoute la méthode arrowheads() au prototype de Polyline
+      if (typeof polyline.arrowheads === 'function') {
+        polyline.arrowheads({
+          size: '12px',       // Taille de la flèche
+          frequency: '100px', // Une flèche tous les 100 pixels (ajustez selon besoin)
+          fill: true,         // Flèche pleine
+          color: color,       // Même couleur que la ligne
+          offsets: { end: "10px" } 
         });
       }
-    };
-
-    // Gestion : tour peut être null, un objet unique (vieux format) ou un tableau (nouveau format)
-    if (Array.isArray(tour)) {
-      tour.forEach(t => processTourObj(t));
-    } else if (tour) {
-      processTourObj(tour);
     }
-
-    return { nodesMap: nMap, nodeRoles: nRoles };
-  }, [mapData, tour]);
-
-  // 2. Préparation des lignes à tracer
-  const routesToDisplay = useMemo(() => {
-    if (!tour) return [];
-    
-    // On normalise en tableau
-    const tourList = Array.isArray(tour) ? tour : [tour];
-
-    return tourList.map((t, index) => {
-      // Conversion des IDs en coords
-      const coords = t.full_path_ids
-        .map(id => {
-          const node = nodesMap.get(id);
-          return node ? [node.latitude, node.longitude] : null;
-        })
-        .filter(c => c !== null);
-
-      return {
-        key: index,
-        coords: coords,
-        color: t.color || "#2563eb" // Couleur fournie par le back, ou bleu par défaut
-      };
-    });
-  }, [tour, nodesMap]);
-
+  }, [positions, color]); 
 
   return (
-    <MapContainer center={defaultCenter} zoom={13} style={mapStyle}>
-      <TileLayer
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        attribution='&copy; OpenStreetMap contributors'
-      />
+    <Polyline 
+      ref={polylineRef}
+      positions={positions}
+      pathOptions={{ 
+        color: color, 
+        weight: 5, 
+        opacity: 0.8,
+        lineJoin: 'round'
+      }} 
+    />
+  );
+}
 
-      {/* Affichage des itinéraires */}
-      {routesToDisplay.map(route => (
-        <RoutePolyline 
-          key={route.key} 
-          positions={route.coords} 
-          color={route.color} 
+export default function MapHolder({ mapData, warehouse, deliveries, route, onNodeClick, isAdding, editingId, deliveryTime }) {
+  
+  const defaultCenter = [45.75, 4.85];
+
+  const nodesMap = useMemo(() => {
+    const map = new Map();
+    if (mapData) mapData.forEach(node => map.set(String(node.id), node));
+    return map;
+  }, [mapData]);
+
+  const warehouseNode = warehouse ? nodesMap.get(String(warehouse.adresse_id)) : null;
+
+  const displayDeliveries = useMemo(() => {
+    if (editingId) return deliveries.filter(l => l.id !== editingId);
+    return deliveries;
+  }, [deliveries, editingId]);
+
+  const tourPolylines = useMemo(() => {
+    if (!route || !Array.isArray(route)) return [];
+
+    return route.map((tour) => {
+      const positions = tour.full_path_ids
+        .map((nodeId) => {
+          const node = nodesMap.get(String(nodeId));
+          return node ? [node.latitude, node.longitude] : null;
+        })
+        .filter((pos) => pos !== null);
+
+      return {
+        positions,
+        color: tour.color || "#2563eb"
+      };
+    });
+  }, [route, nodesMap]);
+
+  return (
+    <MapContainer center={defaultCenter} zoom={13} className={`w-full h-full z-0 ${isAdding || editingId ? 'cursor-crosshair' : ''}`}>
+      <TileLayer attribution='' url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" />
+
+      {tourPolylines.map((tour, idx) => (
+        <RouteWithArrows 
+          key={idx}
+          positions={tour.positions}
+          color={tour.color}
         />
       ))}
 
-      {/* Affichage des marqueurs */}
-      {mapData.map((node) => {
-        const role = nodeRoles.get(node.id);
-        let iconToUse = defaultIcon;
-        let label = `Noeud ${node.id}`;
+      {mapData && mapData.map((node) => (
+        <CircleMarker
+          key={node.id}
+          center={[node.latitude, node.longitude]}
+          radius={(isAdding || editingId) ? 5 : 3} 
+          pathOptions={{ 
+            fillColor: (isAdding || editingId) ? "#3b82f6" : "#5f5f5fff", 
+            fillOpacity: (isAdding || editingId) ? 0.4 : 0.6, 
+            color: (isAdding || editingId) ? "#eff6ff" : "transparent",
+            weight: 1 
+          }}
+          eventHandlers={{
+            click: () => { if (onNodeClick) onNodeClick(node); },
+            mouseover: (e) => e.target.setStyle({ radius: 8, fillOpacity: 1, fillColor: "#2563eb" }),
+            mouseout: (e) => e.target.setStyle({ radius: (isAdding || editingId) ? 5 : 3, fillOpacity: (isAdding || editingId) ? 0.4 : 0.6, fillColor: (isAdding || editingId) ? "#3b82f6" : "#cbd5e1" }),
+          }}
+        >
+          {!(isAdding || editingId) && (
+            <Popup className="custom-popup"><div className="text-xs font-sans">Noeud #{node.id}</div></Popup>
+          )}
+        </CircleMarker>
+      ))}
 
-        if (tour) { // Si un calcul est fait, on filtre et colore
-            if (role === 'ENTREPOT') {
-                iconToUse = warehouseIcon;
-                label = `🏢 Entrepôt (${node.id})`;
-            } else if (role === 'PICKUP') {
-                iconToUse = pickupIcon;
-                label = `📦 Enlèvement (${node.id})`;
-            } else if (role === 'DELIVERY') {
-                iconToUse = deliveryIcon;
-                label = `📍 Livraison (${node.id})`;
-            } else {
-                return null; // On masque les points inutiles
-            }
-        }
-        
+      {(isAdding || editingId) && deliveryTime?.pickupNode && (
+        <Marker position={[deliveryTime.pickupNode.latitude, deliveryTime.pickupNode.longitude]} icon={createNumberedIcon(editingId || "P", "temp-pickup")} zIndexOffset={1000} />
+      )}
+      {(isAdding || editingId) && deliveryTime?.deliveryNode && (
+        <Marker position={[deliveryTime.deliveryNode.latitude, deliveryTime.deliveryNode.longitude]} icon={createNumberedIcon(editingId || "D", "temp-delivery")} zIndexOffset={1000} />
+      )}
+
+      {warehouseNode && (
+        <Marker position={[warehouseNode.latitude, warehouseNode.longitude]} icon={createNumberedIcon("E", "warehouse")} zIndexOffset={1000}>
+          <Popup>Entrepôt</Popup>
+        </Marker>
+      )}
+
+      {displayDeliveries.map((liv) => {
+        const pickupNode = nodesMap.get(String(liv.adresse_pickup_id));
+        const deliveryNode = nodesMap.get(String(liv.adresse_delivery_id));
         return (
-          <Marker 
-            key={node.id} 
-            position={[node.latitude, node.longitude]}
-            icon={iconToUse}
-            eventHandlers={{
-              click: () => { if (onMarkerClick) onMarkerClick(node.id); }
-            }}
-          >
-            <Popup className="font-semibold">{label}</Popup>
-          </Marker>
+          <div key={liv.id}>
+            {pickupNode && <Marker position={[pickupNode.latitude, pickupNode.longitude]} icon={createNumberedIcon(liv.id, "pickup")}><Popup>Livraison #{liv.id} (Pickup)</Popup></Marker>}
+            {deliveryNode && <Marker position={[deliveryNode.latitude, deliveryNode.longitude]} icon={createNumberedIcon(liv.id, "delivery")}><Popup>Livraison #{liv.id} (Delivery)</Popup></Marker>}
+          </div>
         );
       })}
+
+      <MapRecenter mapData={mapData} />
     </MapContainer>
   );
 }

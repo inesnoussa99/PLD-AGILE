@@ -5,70 +5,97 @@ import MapHolder from "./MapHolder";
 import LivraisonList from "./LivraisonList"; 
 
 export default function Layout() {
+
   const [openedMap, setOpenedMap] = useState(false);
   const [mapData, setMapData] = useState([]); 
-  const [livraisons, setLivraisons] = useState([]); 
-  const [tour, setTour] = useState(null);
 
-  // 👇 1. ÉTATS AJOUTÉS (C'est ce qui manquait)
-  const [pickupId, setPickupId] = useState("");
-  const [deliveryId, setDeliveryId] = useState("");
-  const [selectionMode, setSelectionMode] = useState(null); // 'pickup', 'delivery' ou null
+  const [deliveriesData, setDeliveriesData] = useState([]); 
+  const [warehouse, setWarehouse] = useState(null);
+  const [route, setRoute] = useState(null);
 
-  const refreshLivraisons = async () => {
+  const [isAddingMode, setIsAddingMode] = useState(false);
+  const [newLivraison, setNewLivraison] = useState({
+    pickupNode: null,
+    deliveryNode: null
+  });
+
+  const refreshDeliveries = async () => {
     try {
       const response = await fetch("http://localhost:8000/livraisons");
       if (response.ok) {
         const data = await response.json();
-        setLivraisons(data);
+        setDeliveriesData(data);
       }
     } catch (error) {
       console.error("Erreur fetch livraisons:", error);
     }
   };
 
-  // 👇 2. FONCTION DE GESTION DU CLIC
-  const handleMarkerClick = (id) => {
-    if (selectionMode === 'pickup') {
-      setPickupId(id);
-      setSelectionMode(null); // Désactive le mode après choix
-    } else if (selectionMode === 'delivery') {
-      setDeliveryId(id);
-      setSelectionMode(null);
+  const handleDeleteLivraison = async (id) => {
+    try {
+      await fetch(`http://localhost:8000/livraisons/${id}`, { method: 'DELETE' });
+      refreshDeliveries();
+      setRoute(null);
+    } catch (e) {
+      console.error("Erreur suppression", e);
     }
+  };
+
+  const handleNodeClick = (node) => {
+    if (!isAddingMode) return;
+
+    if (!newLivraison.pickupNode) {
+      setNewLivraison(prev => ({ ...prev, pickupNode: node }));
+    } else if (!newLivraison.deliveryNode) {
+      if (node.id === newLivraison.pickupNode.id) {
+        alert("Le point de livraison doit être différent du point d'enlèvement");
+        return;
+      }
+      setNewLivraison(prev => ({ ...prev, deliveryNode: node }));
+    }
+  };
+
+  const cancelAdd = () => {
+    setIsAddingMode(false);
+    setNewLivraison({ pickupNode: null, deliveryNode: null });
   };
 
   return (
     <div className="flex w-full h-screen bg-gray-50 overflow-hidden">
       
       <Sidebar 
-        setMapData={setMapData} 
-        setOpenedMap={setOpenedMap} 
-        onLivraisonsUpdated={refreshLivraisons}
-        setTour={setTour}
+        setOpenedMap={setOpenedMap}
+        setMapData={setMapData}
+        setDeliveriesData={setDeliveriesData}
+        deliveriesData={deliveriesData}
+        setWarehouse={setWarehouse}
+        onLivraisonsUpdated={refreshDeliveries}
+        setRoute={setRoute}
         
-        // 👇 3. TRANSMISSION DES PROPS À LA SIDEBAR
-        pickupId={pickupId}
-        setPickupId={setPickupId}
-        deliveryId={deliveryId}
-        setDeliveryId={setDeliveryId}
-        selectionMode={selectionMode}
-        setSelectionMode={setSelectionMode}
+        isAddingMode={isAddingMode}
+        setIsAddingMode={setIsAddingMode}
+        newLivraison={newLivraison}
+        cancelAdd={cancelAdd}
+        resetNewLivraison={() => setNewLivraison({ pickupNode: null, deliveryNode: null })}
       />
 
-      {livraisons.length > 0 && (
-        <LivraisonList livraisons={livraisons} />
-      )}
+      <LivraisonList 
+        livraisons={deliveriesData} 
+        onDelete={handleDeleteLivraison}
+      />
 
       <div className="flex-1 relative"> 
         {openedMap ? (
           <div className="w-full h-full">
             <MapHolder 
               mapData={mapData} 
-              tour={tour} 
-              // 👇 4. TRANSMISSION DES PROPS À LA MAP
-              onMarkerClick={handleMarkerClick}
-              selectionMode={selectionMode}
+              warehouse={warehouse}
+              deliveries={deliveriesData}
+              route={route}
+              
+              onNodeClick={handleNodeClick}
+              isAdding={isAddingMode}
+              deliveryTime={newLivraison}
             />
           </div>
         ) : (
