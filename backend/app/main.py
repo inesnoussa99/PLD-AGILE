@@ -211,7 +211,3 @@ def save_programme_xml():
     except Exception as e:
         print(f"Erreur export programme: {e}")
         raise HTTPException(status_code=500, detail=f"Erreur lors de la génération du fichier : {e}")
-
-    finally:
-        if os.path.exists(file_path):
-            os.remove(file_path)
