@@ -116,7 +116,8 @@ import { useState } from "react";
 import Sidebar from "./Sidebar";
 import StepCard from "./StepCard";
 import MapHolder from "./MapHolder";
-import LivraisonList from "./LivraisonList"; 
+import LivraisonList from "./LivraisonList";
+import TourDetailPanel from "./TourDetailPanel"; 
 
 export default function Layout() {
 
@@ -137,6 +138,11 @@ export default function Layout() {
   const [isSelectingWarehouse, setIsSelectingWarehouse] = useState(false);
   const [newProgramNode, setNewProgramNode] = useState(null);
   // ----------------------------------------------------
+
+  // --- ÉTATS POUR LE DÉTAIL DE TOURNÉE ---
+  const [selectedTourForDetail, setSelectedTourForDetail] = useState(null);
+  const [animatedDeliveryPerson, setAnimatedDeliveryPerson] = useState(null);
+  // ---------------------------------------
 
   const refreshDeliveries = async () => {
     try {
@@ -210,7 +216,11 @@ export default function Layout() {
         setIsSelectingWarehouse={setIsSelectingWarehouse}
         newProgramNode={newProgramNode}
         setNewProgramNode={setNewProgramNode}
-        // ------------------------------------
+        
+        // --- PROPS POUR DÉTAILS TOURNÉE ---
+        route={route}
+        onShowTourDetail={setSelectedTourForDetail}
+        // ----------------------------------
       />
 
       <LivraisonList 
@@ -220,7 +230,7 @@ export default function Layout() {
 
       <div className="flex-1 relative"> 
         {openedMap ? (
-          <div className="w-full h-full">
+          <div className="w-full h-full relative">
             <MapHolder 
               mapData={mapData} 
               warehouse={warehouse}
@@ -230,7 +240,20 @@ export default function Layout() {
               onNodeClick={handleNodeClick}
               isAdding={isAddingMode || isSelectingWarehouse} 
               deliveryTime={newLivraison}
+              animatedDeliveryPerson={animatedDeliveryPerson}
             />
+            
+            {selectedTourForDetail && (
+              <TourDetailPanel 
+                tour={selectedTourForDetail.tour}
+                tourIndex={selectedTourForDetail.index}
+                onClose={() => {
+                  setSelectedTourForDetail(null);
+                  setAnimatedDeliveryPerson(null);
+                }}
+                onAnimationUpdate={setAnimatedDeliveryPerson}
+              />
+            )}
           </div>
         ) : (
           <div className="p-6 overflow-auto h-full flex flex-col items-center space-y-10">

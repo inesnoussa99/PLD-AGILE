@@ -644,7 +644,9 @@ export default function Sidebar({
   setOpenedMap, setMapData, setDeliveriesData, deliveriesData, setWarehouse, onLivraisonsUpdated, setRoute, 
   isAddingMode, setIsAddingMode, newLivraison, cancelAdd, resetNewLivraison,
   // Nouvelles props reçues de Layout
-  isSelectingWarehouse, setIsSelectingWarehouse, newProgramNode, setNewProgramNode
+  isSelectingWarehouse, setIsSelectingWarehouse, newProgramNode, setNewProgramNode,
+  // Props pour les détails de tournée
+  route, onShowTourDetail
 }) {
   
   const [mapFile, setMapFile] = useState(null);
@@ -1154,6 +1156,36 @@ export default function Sidebar({
                 <Button className="w-full h-12 text-sm font-semibold shadow-md bg-emerald-600 hover:bg-emerald-700 text-white" onClick={handleCalculateRoute}>
                   <Package className="w-4 h-4 mr-2" /> Calculer l'itinéraire
                 </Button>
+
+                {/* Afficher les tournées calculées avec boutons détails */}
+                {route && Array.isArray(route) && route.length > 0 && (
+                  <div className="mt-4 space-y-2">
+                    <div className="text-xs font-bold text-slate-700 mb-2">Tournées calculées :</div>
+                    {route.map((tour, idx) => {
+                      const tourSteps = tour.steps?.filter(s => s.type === "PICKUP" || s.type === "DELIVERY") || [];
+                      return (
+                        <div key={idx} className="flex items-center gap-2 p-2 bg-slate-50 rounded-lg border">
+                          <div 
+                            className="w-3 h-3 rounded-full border-2 border-white shadow-md flex-shrink-0"
+                            style={{ backgroundColor: tour.color || "#2563eb" }}
+                          />
+                          <div className="flex-1 text-xs text-slate-700">
+                            <div className="font-semibold">Livreur {idx + 1}</div>
+                            <div className="text-[10px] text-slate-500">{tourSteps.length} étapes · {Math.round(tour.total_distance)}m</div>
+                          </div>
+                          <Button 
+                            size="sm" 
+                            variant="outline"
+                            className="h-7 text-[10px] px-2"
+                            onClick={() => onShowTourDetail({ tour, index: idx })}
+                          >
+                            Détails
+                          </Button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </>
             ) : (
               <div className="p-2 rounded-xl border border-slate-200 border-dashed text-[10px] text-slate-400">Importer ou créer un programme d'abord</div>
