@@ -100,14 +100,14 @@ export default function TourDetailPanel({ tour, onClose, tourIndex, onAnimationU
     
     animationRef.current = setInterval(() => {
       setCurrentTime(prev => {
-        const next = prev + (0.05 * speed); // 50ms * vitesse = plus fluide
+        const next = prev + (0.05 * speed); // pour + fluide
         if (next >= totalDuration) {
           setIsPlaying(false);
           return totalDuration;
         }
         return next;
       });
-    }, 50); // 50ms au lieu de 100ms pour plus de fluidité
+    }, 50); // 50ms pour + de fluidité
     
     return () => {
       if (animationRef.current) {
