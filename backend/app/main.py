@@ -216,7 +216,7 @@ from sqlmodel import Session, select,delete
 from .database import init_db, engine
 from .models import Livraison, Adresse, Programme
 from .import_xml import import_plan_xml, import_demande_xml
-from .routing import calculate_multiple_tours, add_livraison
+from .routing import calculate_multiple_tours, add_livraison, compute_path_for_animation
 from datetime import time
 
 app = FastAPI()
