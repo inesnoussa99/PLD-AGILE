@@ -22,7 +22,7 @@ const createNumberedIcon = (number, type) => {
 
 // Icône personnalisée pour le livreur animé
 const createDeliveryPersonIcon = (color, isWaiting = false) => {
-  const emoji = isWaiting ? "📦" : "🚶";
+  const emoji = isWaiting ? "📦" : "🚴🏼";
   const pulseClass = isWaiting ? "animate-pulse" : "";
   
   const html = `
@@ -192,7 +192,7 @@ export default function MapHolder({ mapData, warehouse, deliveries, route, onNod
         >
           <Popup>
             <div className="text-xs font-sans">
-              <strong>{animatedDeliveryPerson.isWaiting ? "📦" : "🚶"} Livreur {animatedDeliveryPerson.tourIndex + 1}</strong><br/>
+              <strong>{animatedDeliveryPerson.isWaiting ? "📦" : "🚴🏼"} Livreur {animatedDeliveryPerson.tourIndex + 1}</strong><br/>
               {animatedDeliveryPerson.isWaiting ? "En cours..." : `Position: Nœud #${animatedDeliveryPerson.position.id}`}
             </div>
           </Popup>
