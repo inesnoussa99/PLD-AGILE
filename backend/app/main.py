@@ -200,7 +200,7 @@ def save_programme_xml():
     
     try:
         with Session(engine) as session:
-            export_program_xml(session, file_path)
+            export_program_xml(file_path)
             
         return FileResponse(
             path=file_path,
