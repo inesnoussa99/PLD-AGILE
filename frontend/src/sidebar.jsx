@@ -896,18 +896,36 @@ export default function Sidebar({
     return `<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n` + serializer.serializeToString(xmlDoc);
   };
 
-  const downloadProgram = () => {
-    if (!deliveriesData || deliveriesData.length === 0) return;
-    const depot = { adresse: "2835339774", heureDepart: "8:0:0" };
-    const xmlContent = generateXML(deliveriesData, depot);
-    const blob = new Blob([xmlContent], { type: "application/xml" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "programme.xml";
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+  const downloadProgram = async () => {
+    try {
+      const response = await fetch(`http://localhost:8000/save_programme_xml`, { 
+          method: "GET" 
+      });
+      
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.detail || "Erreur serveur");
+      }
+
+      const blob = await response.blob();
+
+      const url = window.URL.createObjectURL(blob);
+
+      const a = document.createElement('a');
+      a.href = url;  
+    
+      a.download = "programme.xml"; 
+      
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+
+    } catch (error) {
+      setRouteStatus({type:'error', message: "Une erreur est survenue lors du téléchargement."});
+      console.error(error.message);
+    }
+};
 
   const StatusDisplay = ({ status }) => {
     if (!status) return null;

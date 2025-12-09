@@ -269,3 +269,116 @@ def add_livraison(
     session.add(liv)
     session.commit()
 
+def compute_path_for_animation(
+    session: Session,
+    origine_id: str,
+    destination_id: str,
+    vitesse_kmh: float = 15.0,
+) -> Optional[dict]:
+    # Protection vitesse nulle ou négative
+    if vitesse_kmh <= 0:
+        vitesse_kmh = 15.0
+    # Conversion en m/s
+    vitesse_mps = vitesse_kmh * 1000.0 / 3600.0
+    # 1. Construire le graphe
+    G = build_graph(session)
+    # 2. Chercher le plus court chemin (en distance)
+    try:
+        path_ids: List[str] = nx.shortest_path(
+            G,
+            source=origine_id,
+            target=destination_id,
+            weight="weight",
+        )
+    except (nx.NetworkXNoPath, nx.NodeNotFound):
+        # Aucun chemin possible dans le graphe
+        return None
+    if not path_ids or len(path_ids) < 2:
+        # Chemin trivial ou vide
+        return None
+    # 3. Charger les adresses concernées en une seule fois
+    adresses = session.exec(
+        select(Adresse).where(Adresse.id.in_(path_ids))
+    ).all()
+    adresses_by_id: Dict[str, Adresse] = {a.id: a for a in adresses}
+    # Vérifier qu'on a bien toutes les adresses
+    for aid in path_ids:
+        if aid not in adresses_by_id:
+            # Incohérence des données : une adresse du chemin n'existe pas
+            return None
+    # 4. Construire la liste ordonnée des noeuds (pour affichage / animation)
+    nodes = []
+    for idx, aid in enumerate(path_ids):
+        addr = adresses_by_id[aid]
+        nodes.append(
+            {
+                "id": aid,
+                "order": idx,
+                "latitude": addr.latitude,
+                "longitude": addr.longitude,
+            }
+        )
+    # 5. Calcul des segments (tronçons consécutifs du chemin)
+    segments: List[dict] = []
+    distance_totale_m = 0.0
+    duree_totale_s = 0.0
+    # Pour chaque paire (origine, destination) consécutive du chemin
+    for i in range(len(path_ids) - 1):
+        o_id = path_ids[i]
+        d_id = path_ids[i + 1]
+        # Récupérer le tronçon correspondant
+        troncon = session.exec(
+            select(Troncon).where(
+                (Troncon.origine_id == o_id) & (Troncon.destination_id == d_id)
+            )
+        ).first()
+        if troncon is not None:
+            distance_m = float(troncon.longueur)
+        else:
+            # Si le tronçon n'est pas trouvé, on fait un fallback :
+            # distance géographique approximative (lat/lon) en mètres.
+            addr_o = adresses_by_id[o_id]
+            addr_d = adresses_by_id[d_id]
+            # Distance euclidienne approximative (valable pour des petites distances locales)
+            # On utilise un coefficient ~111_000 m par degré pour les latitudes.
+            lat_diff = (addr_d.latitude - addr_o.latitude) * 111_000.0
+            lon_diff = (addr_d.longitude - addr_o.longitude) * 111_000.0 * math.cos(
+                math.radians(addr_o.latitude)
+            )
+            distance_m = math.sqrt(lat_diff**2 + lon_diff**2)
+        # Durée pour ce segment
+        duree_s = distance_m / vitesse_mps
+        distance_totale_m += distance_m
+        duree_totale_s += duree_s
+        segments.append(
+            {
+                "index": i,
+                "origine_id": o_id,
+                "destination_id": d_id,
+                "distance_m": distance_m,
+                "duree_s": duree_s,
+                "distance_cumulative_m": distance_totale_m,
+                "duree_cumulative_s": duree_totale_s,
+                "from": {
+                    "id": o_id,
+                    "latitude": adresses_by_id[o_id].latitude,
+                    "longitude": adresses_by_id[o_id].longitude,
+                },
+                "to": {
+                    "id": d_id,
+                    "latitude": adresses_by_id[d_id].latitude,
+                    "longitude": adresses_by_id[d_id].longitude,
+                },
+            }
+        )
+    # 6. Préparer la réponse globale
+    result = {
+        "origine_id": origine_id,
+        "destination_id": destination_id,
+        "vitesse_kmh": vitesse_kmh,
+        "distance_totale_m": distance_totale_m,
+        "duree_totale_s": duree_totale_s,
+        "nodes": nodes,
+        "segments": segments,
+    }
+    return result

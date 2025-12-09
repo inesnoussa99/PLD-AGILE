@@ -5,7 +5,6 @@ from sqlmodel import Session, select, delete
 from .database import engine
 from .models import Adresse, Livraison, Programme, Troncon
 
-# Chemin vers le dossier data
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 def import_plan_xml(filename: str) -> int:
@@ -19,8 +18,6 @@ def import_plan_xml(filename: str) -> int:
     
     count = 0
     with Session(engine) as session:
-        # ⚡ OPTIMISATION : On vide TOUT avant d'importer un nouveau plan
-        # Cela évite de vérifier l'existence ligne par ligne (trop lent pour Grand Plan)
         print("Nettoyage de la base de données...")
         session.exec(delete(Livraison))
         session.exec(delete(Programme))
@@ -29,7 +26,6 @@ def import_plan_xml(filename: str) -> int:
         session.commit()
 
         print("Début de l'insertion des noeuds...")
-        # On prépare toutes les adresses en mémoire
         adresses_to_add = []
         for addr_el in root.findall("noeud"):
             adresse = Adresse(
@@ -39,7 +35,6 @@ def import_plan_xml(filename: str) -> int:
             )
             adresses_to_add.append(adresse)
         
-        # Insertion massive (beaucoup plus rapide)
         session.add_all(adresses_to_add)
         session.commit()
         count = len(adresses_to_add)
@@ -83,13 +78,10 @@ def import_demande_xml(filename: str) -> int:
 
     nb_livraisons = 0
     with Session(engine) as session:
-        # Nettoyage des livraisons précédentes
         session.exec(delete(Livraison))
         session.exec(delete(Programme))
         session.commit()
 
-        # Vérification RAPIDE que l'entrepôt existe
-        # (On utilise session.get qui est optimisé par clé primaire)
         entrepot_adresse = session.get(Adresse, adresse_entrepot_code)
         if not entrepot_adresse:
             raise ValueError(f"L'adresse de l'entrepôt {adresse_entrepot_code} n'existe pas. Avez-vous importé le bon plan ?")
@@ -109,8 +101,6 @@ def import_demande_xml(filename: str) -> int:
             code_pickup = liv_el.attrib["adresseEnlevement"]
             code_delivery = liv_el.attrib["adresseLivraison"]
             
-            # Note : On ne vérifie pas chaque adresse ici pour gagner du temps. 
-            # Si une adresse manque, la contrainte de clé étrangère SQL lèvera une erreur, ce qui est plus sûr.
             
             livraison = Livraison(
                 adresse_pickup_id=code_pickup,

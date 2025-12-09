@@ -10,3 +10,4 @@ httpx
 pytest-mock
 requests
 pytest-cov
+networkx
