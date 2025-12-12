@@ -250,7 +250,7 @@ export default function TourDetailPanel({ tour, onClose, tourIndex, onAnimationU
   };
 
   const handleSpeedChange = () => {
-    const speeds = [1, 2, 5, 10];
+    const speeds = [10, 20, 30];
     const currentIndex = speeds.indexOf(speed);
     const nextIndex = (currentIndex + 1) % speeds.length;
     setSpeed(speeds[nextIndex]);

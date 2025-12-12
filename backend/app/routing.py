@@ -1,228 +1,248 @@
-import math
-from typing import Dict, List, Optional
-
 import networkx as nx
+import math
+import random
 from sqlmodel import Session, select
-
 from .models import Troncon, Livraison, Programme, Adresse
 
+# --- PARAMÈTRES DES FOURMIS ---
+ACO_ITERATIONS = 50     # Nombre de générations
+ACO_ANT_COUNT = 20      # Nombre de fourmis par génération
+ACO_ALPHA = 1.0         # Importance des phéromones
+ACO_BETA = 2.0          # Importance de la distance (visibilité)
+ACO_EVAPORATION = 0.5   # Vitesse d'évaporation des phéromones (0.5 = 50% par tour)
+ACO_Q = 100.0           # Quantité de phéromone déposée
 
 def build_graph(session: Session) -> nx.DiGraph:
-    """
-    Construit le graphe complet des tronçons.
-
-    Optimisation possible (plus tard) :
-    - cacher le graphe en mémoire et le reconstruire seulement
-      quand un nouveau plan est importé.
-    """
+    """Construit le graphe complet de la ville."""
     troncons = session.exec(select(Troncon)).all()
     G = nx.DiGraph()
     for t in troncons:
-        # Si tu veux, tu peux aussi stocker la vitesse, etc. dans les attributs
         G.add_edge(t.origine_id, t.destination_id, weight=t.longueur)
     return G
 
-
-def get_polar_angle(origin_node: Adresse, target_node: Adresse) -> float:
-    """
-    Calcule l'angle (en radians) entre l'origine (entrepôt) et le pickup.
-    Utilisé pour la méthode "Sweep" qui découpe l'espace en secteurs.
-    """
+def get_polar_angle(origin_node, target_node):
+    """Calcule l'angle pour le Sweep."""
     dx = target_node.longitude - origin_node.longitude
     dy = target_node.latitude - origin_node.latitude
     return math.atan2(dy, dx)
 
-
-def solve_tsp(
-    G: nx.DiGraph,
-    livraisons: List[Livraison],
-    warehouse_id: str,
-    color_hex: str = "#2563eb",
-) -> Optional[dict]:
+def precompute_distances(G, nodes_of_interest):
     """
-    Résout un TSP glouton (plus proche voisin) sur un sous-ensemble de livraisons.
+    Calcule la matrice des distances réelles (Dijkstra) entre tous les points d'intérêt.
+    C'est INDISPENSABLE pour que l'ACO soit rapide (évite de refaire Dijkstra 1000 fois).
+    Retourne: dict[origine][destination] = distance
+    """
+    dist_matrix = {node: {} for node in nodes_of_interest}
+    
+    for start_node in nodes_of_interest:
+        try:
+            length, _ = nx.single_source_dijkstra(G, start_node, weight='weight')
+            for target in nodes_of_interest:
+                if target in length:
+                    dist_matrix[start_node][target] = length[target]
+                else:
+                    dist_matrix[start_node][target] = float('inf')
+        except nx.NetworkXNoPath:
+            pass 
+            
+    return dist_matrix
 
-    - On part de l'entrepôt
-    - On cherche à chaque étape le prochain pickup/delivery le plus proche
-      atteignable dans le graphe.
-    - On force l'ordre : pickup puis delivery de la même livraison.
-
-    Renvoie:
-      {
-        "total_distance": float,
-        "full_path_ids": [id_adresse0, id_adresse1, ...],
-        "steps": [
-          {"type": "ENTREPOT", "id": ...},
-          {"type": "PICKUP", "id": ..., "livraison_id": ...},
-          {"type": "DELIVERY", "id": ..., "livraison_id": ...},
-          {"type": "ENTREPOT_FIN", "id": ...},
-        ],
-        "color": "#xxxxxx"
-      }
+def solve_tsp_aco(G, livraisons, warehouse_id, color_hex="#2563eb"):
+    """
+    Résout le TSP avec contraintes de précédence via ANT COLONY OPTIMIZATION.
     """
     if not livraisons:
         return None
 
-    # Indexation pickup / delivery
-    pickups: Dict[str, Livraison] = {l.adresse_pickup_id: l for l in livraisons}
-    deliveries: Dict[str, Livraison] = {l.adresse_delivery_id: l for l in livraisons}
+    pickups = {l.adresse_pickup_id: l for l in livraisons}
+    deliveries = {l.adresse_delivery_id: l for l in livraisons}
+    
+    poi_ids = set([warehouse_id]) | set(pickups.keys()) | set(deliveries.keys())
+    poi_list = list(poi_ids)
+    
+    dist_matrix = precompute_distances(G, poi_list)
+    
+    pheromones = {i: {j: 1.0 for j in poi_list if i != j} for i in poi_list}
 
-    # Ensemble des noeuds candidats (on commence par les pickups)
-    candidates = set(pickups.keys())
+    best_tour = None
+    best_distance = float('inf')
 
-    current_node = warehouse_id
-    total_distance = 0.0
-    full_path_ids: List[str] = []
-    steps: List[dict] = []
+   
+    for iteration in range(ACO_ITERATIONS):
+        all_tours = []
 
-    # On note le départ entrepôt
-    steps.append({"type": "ENTREPOT", "id": warehouse_id})
+        
+        for _ in range(ACO_ANT_COUNT):
+            current_node = warehouse_id
+            visited = set([warehouse_id])
+            tour_path = [warehouse_id]
+            tour_dist = 0
+            
+            
+           
+            to_visit_pickups = set(pickups.keys())
+            to_visit_deliveries = set(deliveries.keys())
+            done_pickups = set()
+            
+            
+            while to_visit_pickups or to_visit_deliveries:
+                
+                candidates = []
+                
+                
+                candidates.extend(list(to_visit_pickups))
+                
+                
+                available_deliveries = [
+                    d_id for d_id in to_visit_deliveries 
+                    if deliveries[d_id].adresse_pickup_id in done_pickups
+                ]
+                candidates.extend(available_deliveries)
+                
+                if not candidates:
+                    break
 
-    while candidates:
+                
+                probabilities = []
+                denom = 0.0
+                
+                for cand in candidates:
+                    dist = dist_matrix[current_node].get(cand, float('inf'))
+                    if dist == 0: dist = 0.1
+                    
+                    tau = pheromones[current_node][cand] 
+                    eta = 1.0 / dist                    
+                    
+                    prob = (tau ** ACO_ALPHA) * (eta ** ACO_BETA)
+                    probabilities.append(prob)
+                    denom += prob
+                
+                if denom == 0:
+                    next_node = random.choice(candidates)
+                else:
+                    
+                    r = random.uniform(0, denom)
+                    current_sum = 0
+                    next_node = candidates[-1]
+                    for i, cand in enumerate(candidates):
+                        current_sum += probabilities[i]
+                        if r <= current_sum:
+                            next_node = cand
+                            break
+                
+                
+                tour_dist += dist_matrix[current_node][next_node]
+                tour_path.append(next_node)
+                current_node = next_node
+                visited.add(next_node)
+                
+                
+                if current_node in to_visit_pickups:
+                    to_visit_pickups.remove(current_node)
+                    done_pickups.add(current_node)
+                elif current_node in to_visit_deliveries:
+                    to_visit_deliveries.remove(current_node)
+
+            
+            return_dist = dist_matrix[current_node].get(warehouse_id, float('inf'))
+            tour_dist += return_dist
+            tour_path.append(warehouse_id)
+            
+            all_tours.append((tour_dist, tour_path))
+            
+            
+            if tour_dist < best_distance:
+                best_distance = tour_dist
+                best_tour = tour_path
+
+        
+        for i in pheromones:
+            for j in pheromones[i]:
+                pheromones[i][j] *= (1.0 - ACO_EVAPORATION)
+        
+       
+        for dist, path in all_tours:
+            deposit = ACO_Q / dist if dist > 0 else 0
+            for k in range(len(path) - 1):
+                u, v = path[k], path[k+1]
+                if v in pheromones[u]: 
+                    pheromones[u][v] += deposit
+
+
+    
+    if not best_tour:
+        return None
+        
+    final_full_path = []
+    final_steps = []
+    
+    
+    final_steps.append({"type": "ENTREPOT", "id": warehouse_id})
+    
+    
+    for k in range(len(best_tour) - 1):
+        u, v = best_tour[k], best_tour[k+1]
+        
+       
         try:
-            # Plus courts chemins depuis la position courante
-            lengths, paths = nx.single_source_dijkstra(G, current_node, weight="weight")
+            path = nx.shortest_path(G, u, v, weight='weight')
+            
+            if final_full_path:
+                final_full_path.extend(path[1:])
+            else:
+                final_full_path.extend(path)
+            
+            # Ajout de l'étape
+            if v == warehouse_id:
+                final_steps.append({"type": "ENTREPOT_FIN", "id": v})
+            elif v in pickups:
+                liv = pickups[v]
+                final_steps.append({"type": "PICKUP", "id": v, "livraison_id": liv.id})
+            elif v in deliveries:
+                liv = deliveries[v]
+                final_steps.append({"type": "DELIVERY", "id": v, "livraison_id": liv.id})
+                
         except nx.NetworkXNoPath:
-            # Impossible de continuer : le graphe ne permet pas d'atteindre les candidats restants
-            print(f"[solve_tsp] Aucun chemin depuis {current_node} vers les candidats restants.")
+            print(f"Erreur reconstruction chemin {u}->{v}")
             return None
 
-        # Ne garder que les distances vers les candidats encore à visiter
-        available_candidates = {
-            node: dist for node, dist in lengths.items() if node in candidates
-        }
-
-        if not available_candidates:
-            # On ne peut plus atteindre aucun candidat
-            break
-
-        # Candidat le plus proche
-        nearest_node = min(available_candidates, key=available_candidates.get)
-        distance_to_travel = available_candidates[nearest_node]
-        path_to_travel = paths[nearest_node]
-
-        # Mise à jour du chemin complet
-        total_distance += distance_to_travel
-        if full_path_ids:
-            # On évite de répéter le noeud courant
-            full_path_ids.extend(path_to_travel[1:])
-        else:
-            full_path_ids.extend(path_to_travel)
-
-        # On se déplace
-        current_node = nearest_node
-        candidates.remove(current_node)
-
-        # Pickup ou delivery ?
-        if current_node in pickups:
-            livraison = pickups[current_node]
-            # On ajoute sa delivery comme future candidate
-            candidates.add(livraison.adresse_delivery_id)
-            steps.append(
-                {
-                    "type": "PICKUP",
-                    "id": current_node,
-                    "livraison_id": livraison.id,
-                }
-            )
-        elif current_node in deliveries:
-            livraison = deliveries[current_node]
-            steps.append(
-                {
-                    "type": "DELIVERY",
-                    "id": current_node,
-                    "livraison_id": livraison.id,
-                }
-            )
-
-    # Retour à l'entrepôt
-    try:
-        return_length = nx.shortest_path_length(
-            G, current_node, warehouse_id, weight="weight"
-        )
-        return_path = nx.shortest_path(
-            G, current_node, warehouse_id, weight="weight"
-        )
-
-        total_distance += return_length
-        # On évite de dupliquer current_node
-        full_path_ids.extend(return_path[1:])
-        steps.append({"type": "ENTREPOT_FIN", "id": warehouse_id})
-    except nx.NetworkXNoPath:
-        print("[solve_tsp] Impossible de revenir à l'entrepôt.")
-        return None
-
     return {
-        "total_distance": total_distance,
-        "full_path_ids": full_path_ids,
-        "steps": steps,
-        "color": color_hex,
+        "total_distance": best_distance,
+        "full_path_ids": final_full_path,
+        "steps": final_steps,
+        "color": color_hex
     }
 
 
 def calculate_multiple_tours(session: Session, nb_livreurs: int):
     """
-    Divise les livraisons en secteurs angulaires (méthode Sweep) autour de l'entrepôt
-    et calcule une tournée TSP gloutonne pour chaque livreur.
-
-    Optimisations par rapport à ta version :
-    - Bug de "sorted_livraisons" corrigé
-    - Chargement des adresses des pickups en une seule requête au lieu d'un
-      session.get() dans la boucle.
+    Divise les livraisons par secteurs (Sweep) et applique les Fourmis (ACO) sur chaque secteur.
     """
     G = build_graph(session)
-    all_livraisons: List[Livraison] = session.exec(select(Livraison)).all()
-    programme: Programme | None = session.exec(select(Programme)).first()
+    all_livraisons = session.exec(select(Livraison)).all()
+    programme = session.exec(select(Programme)).first()
 
     if not programme or not all_livraisons:
         return []
 
     warehouse_id = programme.adresse_depart_id
-    warehouse_node: Adresse | None = session.get(Adresse, warehouse_id)
+    from .models import Adresse
+    warehouse_node = session.get(Adresse, warehouse_id)
 
-    if warehouse_node is None:
-        # Cas de plan mal initialisé
-        print("[calculate_multiple_tours] Adresse départ introuvable.")
-        return []
-
-    # Cas 1 seul livreur : une seule tournée globale
-    if nb_livreurs <= 1:
-        tour = solve_tsp(G, all_livraisons, warehouse_id)
-        return [tour] if tour else []
-
-    # Précharger les adresses des pickups en une seule fois
-    pickup_ids = {liv.adresse_pickup_id for liv in all_livraisons}
-    if not pickup_ids:
-        return []
-
-    adresses_pickup = session.exec(
-        select(Adresse).where(Adresse.id.in_(pickup_ids))
-    ).all()
-    adresses_by_id: Dict[str, Adresse] = {a.id: a for a in adresses_pickup}
-
-    livraisons_with_angle: List[tuple[float, Livraison]] = []
-
+    livraisons_with_angle = []
     for liv in all_livraisons:
-        pickup_node = adresses_by_id.get(liv.adresse_pickup_id)
-        if pickup_node is None:
-            # Pickup sans adresse valide : on la saute
-            continue
-        angle = get_polar_angle(warehouse_node, pickup_node)
-        livraisons_with_angle.append((angle, liv))
+        pickup_node = session.get(Adresse, liv.adresse_pickup_id)
+        if pickup_node:
+            angle = get_polar_angle(warehouse_node, pickup_node)
+            livraisons_with_angle.append((angle, liv))
 
-    # Tri par angle croissant
     livraisons_with_angle.sort(key=lambda x: x[0])
+    sorted_livraisons = [x[1] for x in livraisons_with_angle]
 
-    # ⚠️ Corrigé ici
-    sorted_livraisons: List[Livraison] = [item[1] for item in livraisons_with_angle]
-
-    if not sorted_livraisons:
-        return []
-
-    # Nombre de livreurs réellement utilisés (au plus nb_livreurs, au plus nb_livraisons)
     k = min(nb_livreurs, len(sorted_livraisons))
+    if k == 0: return []
+    
     chunk_size = math.ceil(len(sorted_livraisons) / k)
-
     tours = []
     colors = ["#2563eb", "#e11d48", "#16a34a", "#d97706", "#9333ea", "#0891b2"]
 
@@ -230,155 +250,65 @@ def calculate_multiple_tours(session: Session, nb_livreurs: int):
         start_idx = i * chunk_size
         end_idx = start_idx + chunk_size
         sub_group = sorted_livraisons[start_idx:end_idx]
-
+        
         if not sub_group:
             continue
 
         color = colors[i % len(colors)]
-        tour = solve_tsp(G, sub_group, warehouse_id, color)
-
+        
+       
+        tour = solve_tsp_aco(G, sub_group, warehouse_id, color)
+        
         if tour:
             tours.append(tour)
 
     return tours
 
-
-def add_livraison(
-    session: Session,
-    pickup_id: str,
-    delivery_id: str,
-    d_pickup: int,
-    d_delivery: int,
-    date_jour,
-):
-    """
-    Insère une nouvelle livraison liée au programme courant.
-    """
-    programme: Programme | None = session.exec(select(Programme)).first()
-    if not programme:
-        return
-
+def add_livraison(session, pickup_id, delivery_id, d_pickup, d_delivery, date_jour):
+    from .models import Livraison, Programme
+    programme = session.exec(select(Programme)).first()
+    if not programme: return
     liv = Livraison(
-        adresse_pickup_id=pickup_id,
-        adresse_delivery_id=delivery_id,
-        duree_pickup=d_pickup,
-        duree_delivery=d_delivery,
-        date=date_jour,
-        programme_id=programme.id,
+        adresse_pickup_id=pickup_id, adresse_delivery_id=delivery_id,
+        duree_pickup=d_pickup, duree_delivery=d_delivery,
+        date=date_jour, programme_id=programme.id
     )
     session.add(liv)
     session.commit()
 
-def compute_path_for_animation(
-    session: Session,
-    origine_id: str,
-    destination_id: str,
-    vitesse_kmh: float = 15.0,
-) -> Optional[dict]:
-    # Protection vitesse nulle ou négative
-    if vitesse_kmh <= 0:
-        vitesse_kmh = 15.0
-    # Conversion en m/s
-    vitesse_mps = vitesse_kmh * 1000.0 / 3600.0
-    # 1. Construire le graphe
+
+def compute_path_for_animation(session: Session, origine_id: str, destination_id: str, vitesse_kmh: float = 15.0):
+    """
+    Calcule le chemin détaillé (liste de nœuds) entre deux points pour l'animation.
+    Utilisé par le frontend pour afficher le déplacement du livreur.
+    """
     G = build_graph(session)
-    # 2. Chercher le plus court chemin (en distance)
+    
     try:
-        path_ids: List[str] = nx.shortest_path(
-            G,
-            source=origine_id,
-            target=destination_id,
-            weight="weight",
-        )
+        path_ids = nx.shortest_path(G, source=origine_id, target=destination_id, weight='weight')
+        distance_m = nx.shortest_path_length(G, source=origine_id, target=destination_id, weight='weight')
     except (nx.NetworkXNoPath, nx.NodeNotFound):
-        # Aucun chemin possible dans le graphe
         return None
-    if not path_ids or len(path_ids) < 2:
-        # Chemin trivial ou vide
-        return None
-    # 3. Charger les adresses concernées en une seule fois
-    adresses = session.exec(
-        select(Adresse).where(Adresse.id.in_(path_ids))
-    ).all()
-    adresses_by_id: Dict[str, Adresse] = {a.id: a for a in adresses}
-    # Vérifier qu'on a bien toutes les adresses
-    for aid in path_ids:
-        if aid not in adresses_by_id:
-            # Incohérence des données : une adresse du chemin n'existe pas
-            return None
-    # 4. Construire la liste ordonnée des noeuds (pour affichage / animation)
-    nodes = []
-    for idx, aid in enumerate(path_ids):
-        addr = adresses_by_id[aid]
-        nodes.append(
-            {
-                "id": aid,
-                "order": idx,
-                "latitude": addr.latitude,
-                "longitude": addr.longitude,
-            }
-        )
-    # 5. Calcul des segments (tronçons consécutifs du chemin)
-    segments: List[dict] = []
-    distance_totale_m = 0.0
-    duree_totale_s = 0.0
-    # Pour chaque paire (origine, destination) consécutive du chemin
-    for i in range(len(path_ids) - 1):
-        o_id = path_ids[i]
-        d_id = path_ids[i + 1]
-        # Récupérer le tronçon correspondant
-        troncon = session.exec(
-            select(Troncon).where(
-                (Troncon.origine_id == o_id) & (Troncon.destination_id == d_id)
-            )
-        ).first()
-        if troncon is not None:
-            distance_m = float(troncon.longueur)
-        else:
-            # Si le tronçon n'est pas trouvé, on fait un fallback :
-            # distance géographique approximative (lat/lon) en mètres.
-            addr_o = adresses_by_id[o_id]
-            addr_d = adresses_by_id[d_id]
-            # Distance euclidienne approximative (valable pour des petites distances locales)
-            # On utilise un coefficient ~111_000 m par degré pour les latitudes.
-            lat_diff = (addr_d.latitude - addr_o.latitude) * 111_000.0
-            lon_diff = (addr_d.longitude - addr_o.longitude) * 111_000.0 * math.cos(
-                math.radians(addr_o.latitude)
-            )
-            distance_m = math.sqrt(lat_diff**2 + lon_diff**2)
-        # Durée pour ce segment
-        duree_s = distance_m / vitesse_mps
-        distance_totale_m += distance_m
-        duree_totale_s += duree_s
-        segments.append(
-            {
-                "index": i,
-                "origine_id": o_id,
-                "destination_id": d_id,
-                "distance_m": distance_m,
-                "duree_s": duree_s,
-                "distance_cumulative_m": distance_totale_m,
-                "duree_cumulative_s": duree_totale_s,
-                "from": {
-                    "id": o_id,
-                    "latitude": adresses_by_id[o_id].latitude,
-                    "longitude": adresses_by_id[o_id].longitude,
-                },
-                "to": {
-                    "id": d_id,
-                    "latitude": adresses_by_id[d_id].latitude,
-                    "longitude": adresses_by_id[d_id].longitude,
-                },
-            }
-        )
-    # 6. Préparer la réponse globale
-    result = {
-        "origine_id": origine_id,
-        "destination_id": destination_id,
-        "vitesse_kmh": vitesse_kmh,
-        "distance_totale_m": distance_totale_m,
-        "duree_totale_s": duree_totale_s,
-        "nodes": nodes,
-        "segments": segments,
+
+    nodes_data = []
+    
+    adresses = session.exec(select(Adresse).where(Adresse.id.in_(path_ids))).all()
+    adresses_map = {a.id: a for a in adresses}
+    
+    for nid in path_ids:
+        if nid in adresses_map:
+            node = adresses_map[nid]
+            nodes_data.append({
+                "id": node.id,
+                "latitude": node.latitude,
+                "longitude": node.longitude
+            })
+            
+    vitesse_ms = vitesse_kmh / 3.6
+    duree_s = distance_m / vitesse_ms if vitesse_ms > 0 else 0
+    
+    return {
+        "duree_totale_s": duree_s,
+        "distance_totale_m": distance_m,
+        "nodes": nodes_data
     }
-    return result
