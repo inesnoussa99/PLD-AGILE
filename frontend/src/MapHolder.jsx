@@ -20,6 +20,27 @@ const createNumberedIcon = (number, type) => {
   return L.divIcon({ className: "bg-transparent", html, iconSize: [24, 24], iconAnchor: [12, 12], popupAnchor: [0, -12] });
 };
 
+// Icône personnalisée pour le livreur animé
+const createDeliveryPersonIcon = (color, isWaiting = false) => {
+  const emoji = isWaiting ? "📦" : "🚴🏼";
+  const pulseClass = isWaiting ? "animate-pulse" : "";
+  
+  const html = `
+    <div class="relative">
+      <div class="relative w-8 h-8 rounded-full flex items-center justify-center text-white text-lg font-bold border-3 border-white shadow-lg ${pulseClass}" style="background-color: ${color};">
+        ${emoji}
+      </div>
+    </div>
+  `;
+  return L.divIcon({ 
+    className: "bg-transparent", 
+    html, 
+    iconSize: [32, 32], 
+    iconAnchor: [16, 16], 
+    popupAnchor: [0, -16] 
+  });
+};
+
 function MapRecenter({ mapData }) {
   const map = useMap();
   useEffect(() => {
@@ -65,7 +86,7 @@ function RouteWithArrows({ positions, color }) {
   );
 }
 
-export default function MapHolder({ mapData, warehouse, deliveries, route, onNodeClick, isAdding, editingId, deliveryTime }) {
+export default function MapHolder({ mapData, warehouse, deliveries, route, onNodeClick, isAdding, editingId, deliveryTime, animatedDeliveryPerson }) {
   
   const defaultCenter = [45.75, 4.85];
 
@@ -159,7 +180,44 @@ export default function MapHolder({ mapData, warehouse, deliveries, route, onNod
         );
       })}
 
+      {/* Livreur animé */}
+      {animatedDeliveryPerson && animatedDeliveryPerson.position && animatedDeliveryPerson.isActive && route && route[animatedDeliveryPerson.tourIndex] && (
+        <Marker 
+          position={[animatedDeliveryPerson.position.latitude, animatedDeliveryPerson.position.longitude]} 
+          icon={createDeliveryPersonIcon(
+            route[animatedDeliveryPerson.tourIndex].color || "#2563eb",
+            animatedDeliveryPerson.isWaiting
+          )}
+          zIndexOffset={3000}
+        >
+          <Popup>
+            <div className="text-xs font-sans">
+              <strong>{animatedDeliveryPerson.isWaiting ? "📦" : "🚴🏼"} Livreur {animatedDeliveryPerson.tourIndex + 1}</strong><br/>
+              {animatedDeliveryPerson.isWaiting ? "En cours..." : `Position: Nœud #${animatedDeliveryPerson.position.id}`}
+            </div>
+          </Popup>
+        </Marker>
+      )}
+
       <MapRecenter mapData={mapData} />
+      
+      {/* Légende mini en bas à gauche */}
+      <div className="absolute bottom-4 left-4 z-[1000] bg-white/95 backdrop-blur rounded-lg shadow-lg px-2 py-1.5 border border-gray-200">
+        <div className="flex gap-3 text-[10px] text-gray-700">
+          <div className="flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-yellow-400 border border-gray-300"></span>
+            <span>Entrepôt</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+            <span>Pickup</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-red-500"></span>
+            <span>Delivery</span>
+          </div>
+        </div>
+      </div>
     </MapContainer>
   );
 }

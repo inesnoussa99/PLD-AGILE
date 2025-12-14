@@ -1,6 +1,13 @@
 fastapi
-uvicorn[standard]
+uvicorn
 sqlmodel
 psycopg2-binary
+networkx
 python-multipart
+# --- Outils de Test ---
+pytest
+httpx
+pytest-mock
+requests
+pytest-cov
 networkx
