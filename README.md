@@ -145,7 +145,6 @@ Projet réalisé par le groupe Hexanôme 4141 — INSA Lyon :
 
 ## 🔮 Pistes d’amélioration
 
-- Passage de Dijkstra à A* pour améliorer les performances
 - Mise en cache des graphes et des chemins
 - Validation plus stricte des entrées
 - Amélioration UX (temps, créneaux, export PDF)
