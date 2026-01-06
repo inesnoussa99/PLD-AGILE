@@ -63,7 +63,7 @@ Docker démarre automatiquement :
 ### 3. Accéder à l’application
 
 Frontend (interface utilisateur) :
-http://localhost:3000
+http://localhost:5173
 
 Backend (API REST) :
 http://localhost:8000
